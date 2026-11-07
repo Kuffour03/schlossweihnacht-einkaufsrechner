@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schlossweihnacht – Vorratsliste</title>
+<style>
+  :root { --bg: #f6f3ee; --card: #fff; --ink: #1d2327; --muted: #5d676e; --line: #d9d3c9;
+          --accent: #0b6b4d; --accent-ink: #fff; --warn: #a33a00; --err: #a1181d; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 18px/1.4 system-ui, sans-serif; }
+  [hidden] { display: none !important; }
+  header, main { max-width: 52rem; margin: 0 auto; padding: .75rem; }
+  h1 { font-size: 1.35rem; margin: 0 0 .5rem; }
+  h2 { font-size: 1.2rem; margin: .25rem 0 .75rem; }
+  h3 { font-size: 1rem; margin: 1rem 0 .4rem; color: var(--muted); }
+  .day { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+  nav { display: flex; gap: .4rem; flex-wrap: wrap; margin: .5rem 0; }
+  nav button { flex: 1 1 auto; }
+  button, input, select { font: inherit; min-height: 48px; border-radius: 8px; border: 1px solid var(--line);
+                          padding: .4rem .7rem; background: var(--card); color: var(--ink); }
+  button { cursor: pointer; background: var(--card); }
+  button.primary, nav button[aria-current="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.danger { color: var(--err); }
+  button.small { min-height: 40px; padding: .2rem .6rem; font-size: .9rem; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: .9rem; margin-bottom: 1rem; }
+  label { display: block; font-size: .9rem; color: var(--muted); margin-bottom: .2rem; }
+  .form { display: grid; gap: .7rem; grid-template-columns: 1fr; }
+  .form .full { grid-column: 1 / -1; }
+  .form input, .form select { width: 100%; }
+  @media (min-width: 40rem) { .form { grid-template-columns: 1fr 1fr; } }
+  ul { list-style: none; margin: 0; padding: 0; }
+  .list > li { padding: .6rem 0; border-top: 1px solid var(--line); }
+  .list > li:first-child { border-top: 0; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: .6rem; flex-wrap: wrap; }
+  .row > div { min-width: 0; overflow-wrap: anywhere; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  .reasons { color: var(--warn); font-size: .95rem; margin-top: .25rem; }
+  .low { color: var(--warn); font-weight: 600; }
+  .empty { color: var(--muted); }
+  .actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .6rem; }
+  #msg { min-height: 1.5rem; margin: .25rem 0 .5rem; font-weight: 600; }
+  #msg.ok { color: var(--accent); } #msg.err { color: var(--err); }
+  .total { font-size: 1.25rem; font-weight: 700; margin-bottom: .5rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Schlossweihnacht – Vorratsliste</h1>
+  <div class="day">
+    <label for="today" style="margin:0">Stichtag</label>
+    <input type="date" id="today">
+  </div>
+  <nav id="nav">
+    <button type="button" data-act="tab" data-id="due">Heute</button>
+    <button type="button" data-act="tab" data-id="entry">Erfassen</button>
+    <button type="button" data-act="tab" data-id="stock">Bestand</button>
+    <button type="button" data-act="tab" data-id="overview">Übersicht</button>
+    <button type="button" data-act="tab" data-id="articles">Artikel</button>
+    <button type="button" data-act="tab" data-id="data">Daten</button>
+  </nav>
+  <div id="msg" role="status" aria-live="polite"></div>
+</header>
+<main>
+
+<section data-tab-panel="due">
+  <h2>Heute nachkaufen</h2>
+  <p class="muted" id="dueHint"></p>
+  <div id="dueList"></div>
+</section>
+
+<section data-tab-panel="entry" hidden>
+  <h2>Einkauf, Verbrauch oder Zählung erfassen</h2>
+  <form id="entryForm" class="form" autocomplete="off">
+    <div class="full"><label for="entryArticle">Artikel</label><select id="entryArticle" required></select></div>
+    <div><label for="entryType">Art</label><select id="entryType"></select></div>
+    <div><label for="entryQty" id="entryQtyLabel">Menge</label><input id="entryQty" type="text" inputmode="decimal" required></div>
+    <div><label for="entryDate">Datum</label><input id="entryDate" type="date" required></div>
+    <div data-purchase-only><label for="entryShop">Laden (optional)</label><input id="entryShop" type="text" list="shopList"><datalist id="shopList"></datalist></div>
+    <div data-purchase-only><label for="entryPrice">Preis gesamt in € (optional)</label><input id="entryPrice" type="text" inputmode="decimal"></div>
+    <div class="full"><button type="submit" class="primary">Speichern</button></div>
+  </form>
+  <h3>Letzte Erfassungen</h3>
+  <div id="entryList"></div>
+</section>
+
+<section data-tab-panel="stock" hidden>
+  <h2>Bestand</h2>
+  <div id="stockList"></div>
+</section>
+
+<section data-tab-panel="overview" hidden>
+  <h2>Übersicht der Einkäufe</h2>
+  <div id="summary"></div>
+</section>
+
+<section data-tab-panel="articles" hidden>
+  <h2>Artikelstamm</h2>
+  <form id="articleForm" class="form" autocomplete="off">
+    <input type="hidden" id="articleId">
+    <div class="full"><label for="articleName">Name</label><input id="articleName" type="text" required></div>
+    <div><label for="articleUnit">Einheit (z. B. Stück, kg, Kiste, Packung)</label><input id="articleUnit" type="text" list="unitList" required>
+      <datalist id="unitList"><option value="Stück"><option value="kg"><option value="Kiste"><option value="Packung"><option value="Bund"></datalist></div>
+    <div><label for="articleCategory">Kategorie</label><select id="articleCategory"></select></div>
+    <div><label for="articleRhythm">Bestellrhythmus</label><select id="articleRhythm"></select></div>
+    <div id="everyBox" hidden><label for="articleEvery">Alle wie viele Tage (N)?</label><input id="articleEvery" type="text" inputmode="numeric"></div>
+    <div><label for="articleMin">Mindestbestand (optional)</label><input id="articleMin" type="text" inputmode="decimal"></div>
+    <div class="full actions">
+      <button type="submit" class="primary" id="articleSave">Artikel speichern</button>
+      <button type="button" data-act="cancel-edit" id="articleCancel" hidden>Abbrechen</button>
+    </div>
+  </form>
+  <div class="actions"><button type="button" data-act="sample">Beispielartikel laden</button></div>
+  <h3>Alle Artikel</h3>
+  <div id="articleList"></div>
+</section>
+
+<section data-tab-panel="data" hidden>
+  <h2>Daten</h2>
+  <p class="muted">Die Daten liegen nur in diesem Browser. Zum Sichern und für andere Geräte als CSV exportieren und dort importieren (erst Artikelstamm, dann Einkäufe).</p>
+  <div class="actions">
+    <button type="button" data-act="export-articles">Artikelstamm exportieren</button>
+    <button type="button" data-act="export-entries">Einkäufe exportieren</button>
+  </div>
+  <div class="form" style="margin-top:.8rem">
+    <div><label for="importArticles">Artikelstamm importieren (ersetzt den Stamm)</label><input id="importArticles" type="file" accept=".csv,text/csv"></div>
+    <div><label for="importEntries">Einkäufe importieren (ersetzt alle Erfassungen)</label><input id="importEntries" type="file" accept=".csv,text/csv"></div>
+  </div>
+  <div class="actions"><button type="button" class="danger" data-act="clear-all">Alle Daten löschen</button></div>
+</section>
+
+</main>
+
+<script id="logic">
+var StockLogic = (function () {
+  'use strict';
+
+  var CATEGORIES = [
+    { id: 'frisch', label: 'Lebensmittel frisch' },
+    { id: 'haltbar', label: 'Lebensmittel haltbar' },
+    { id: 'verbrauch', label: 'Verbrauchsartikel' }
+  ];
+  var RHYTHMS = [
+    { id: 'daily', label: 'täglich' },
+    { id: 'every', label: 'alle N Tage' },
+    { id: 'weekly', label: 'wöchentlich' },
+    { id: 'once', label: 'einmalig zu Beginn' },
+    { id: 'asneeded', label: 'nach Bedarf' }
+  ];
+  var ENTRY_TYPES = [
+    { id: 'purchase', label: 'Einkauf' },
+    { id: 'consume', label: 'Verbrauch' },
+    { id: 'count', label: 'Zählung (Bestand setzen)' }
+  ];
+  var ARTICLE_COLUMNS = ['id', 'name', 'unit', 'category', 'rhythm', 'every_days', 'min_stock'];
+  var ENTRY_COLUMNS = ['id', 'article_id', 'type', 'qty', 'date', 'shop', 'price'];
+
+  function hasId(list, id) {
+    return list.some(function (x) { return x.id === id; });
+  }
+  function labelOf(list, id) {
+    for (var i = 0; i < list.length; i++) { if (list[i].id === id) { return list[i].label; } }
+    return String(id);
+  }
+
+  /* ---------- Datum und Zahlen ---------- */
+
+  function isValidDate(s) {
+    if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) { return false; }
+    if (s < '1970-01-01' || s > '2999-12-31') { return false; }
+    var t = Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10));
+    return new Date(t).toISOString().slice(0, 10) === s;
+  }
+  function dayNumber(s) {
+    return Math.round(Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) / 86400000);
+  }
+  function daysBetween(from, to) {
+    return dayNumber(to) - dayNumber(from);
+  }
+  function todayString(d) {
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function formatDate(s) {
+    return s.slice(8, 10) + '.' + s.slice(5, 7) + '.' + s.slice(0, 4);
+  }
+  /* leer -> null, ungültig -> NaN; Komma oder Punkt als Dezimalzeichen, keine Vorzeichen */
+  function parseNumber(v) {
+    if (v === null || v === undefined) { return null; }
+    if (typeof v === 'number') { return isFinite(v) ? v : NaN; }
+    var s = String(v).trim().replace(',', '.');
+    if (s === '') { return null; }
+    return /^\d+(\.\d+)?$/.test(s) ? Number(s) : NaN;
+  }
+  function round6(n) { return Math.round(n * 1e6) / 1e6; }
+  function fmtNumber(n) { return String(round6(n)).replace('.', ','); }
+  /* nach "vor": Dativ */
+  function daysAgo(days) { return days === 1 ? '1 Tag' : days + ' Tagen'; }
+  function priceToCents(price) { return price === null || price === undefined ? 0 : Math.round(price * 100); }
+  function formatEuro(cents) { return (cents / 100).toFixed(2).replace('.', ',') + ' €'; }
+  function newId(list, prefix) {
+    var max = 0;
+    list.forEach(function (x) {
+      var m = new RegExp('^' + prefix + '(\\d+)$').exec(x.id);
+      if (m && +m[1] > max) { max = +m[1]; }
+    });
+    return prefix + (max + 1);
+  }
+
+  /* ---------- Artikel ---------- */
+
+  function makeArticle(raw) {
+    var rhythm = String(raw.rhythm || '').trim();
+    return {
+      id: String(raw.id || '').trim(),
+      name: String(raw.name || '').trim(),
+      unit: String(raw.unit || '').trim(),
+      category: String(raw.category || '').trim(),
+      rhythm: rhythm,
+      everyDays: rhythm === 'every' ? parseNumber(raw.everyDays) : null,
+      minStock: parseNumber(raw.minStock)
+    };
+  }
+  function validateArticle(a) {
+    var errors = [];
+    if (!a.name) { errors.push('Name fehlt'); }
+    if (!a.unit) { errors.push('Einheit fehlt'); }
+    if (!hasId(CATEGORIES, a.category)) { errors.push('Kategorie unbekannt: ' + a.category); }
+    if (!hasId(RHYTHMS, a.rhythm)) {
+      errors.push('Rhythmus unbekannt: ' + a.rhythm);
+    } else if (a.rhythm === 'every' && !(Number.isInteger(a.everyDays) && a.everyDays >= 1)) {
+      errors.push('Bei "alle N Tage" muss N eine ganze Zahl ab 1 sein');
+    }
+    if (a.minStock !== null && !(typeof a.minStock === 'number' && a.minStock >= 0)) {
+      errors.push('Mindestbestand ungültig');
+    }
+    return errors;
+  }
+  function rhythmText(a) {
+    if (a.rhythm === 'every') { return 'Alle ' + a.everyDays + ' Tage'; }
+    var t = labelOf(RHYTHMS, a.rhythm);
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+  function intervalDays(a) {
+    if (a.rhythm === 'daily') { return 1; }
+    if (a.rhythm === 'weekly') { return 7; }
+    if (a.rhythm === 'every') { return a.everyDays; }
+    return null;
+  }
+
+  /* ---------- Erfassungen: Einkauf, Verbrauch, Zählung ---------- */
+
+  function makeEntry(raw) {
+    var type = String(raw.type || '').trim();
+    return {
+      id: String(raw.id || '').trim(),
+      articleId: String(raw.articleId || '').trim(),
+      type: type,
+      qty: parseNumber(raw.qty),
+      date: String(raw.date || '').trim(),
+      shop: String(raw.shop || '').trim(),
+      price: type === 'purchase' ? parseNumber(raw.price) : null
+    };
+  }
+  function validateEntry(e, articles) {
+    var errors = [];
+    if (!articles.some(function (a) { return a.id === e.articleId; })) { errors.push('Artikel unbekannt: ' + e.articleId); }
+    if (!hasId(ENTRY_TYPES, e.type)) { errors.push('Art unbekannt: ' + e.type); }
+    if (typeof e.qty !== 'number' || !isFinite(e.qty)) {
+      errors.push('Menge fehlt oder ungültig');
+    } else if (e.type !== 'count' && e.qty <= 0) {
+      errors.push('Menge muss größer als 0 sein');
+    }
+    if (!isValidDate(e.date)) { errors.push('Datum ungültig: ' + e.date); }
+    if (e.price !== null && !(typeof e.price === 'number' && e.price >= 0)) { errors.push('Preis ungültig'); }
+    return errors;
+  }
+  /* nach Datum, bei gleichem Datum in Erfassungsreihenfolge */
+  function sortedEntries(entries) {
+    return entries
+      .map(function (e, i) { return { e: e, i: i }; })
+      .sort(function (a, b) { return a.e.date < b.e.date ? -1 : a.e.date > b.e.date ? 1 : a.i - b.i; })
+      .map(function (x) { return x.e; });
+  }
+
+  /* Einkauf erhöht, Verbrauch verringert (nie unter 0), Zählung setzt den Bestand */
+  function stockOf(articleId, entries, asOf) {
+    var stock = 0;
+    sortedEntries(entries).forEach(function (e) {
+      if (e.articleId !== articleId) { return; }
+      if (asOf && e.date > asOf) { return; }
+      if (e.type === 'purchase') { stock += e.qty; }
+      else if (e.type === 'consume') { stock = Math.max(0, stock - e.qty); }
+      else if (e.type === 'count') { stock = e.qty; }
+    });
+    return round6(stock);
+  }
+  function lastPurchaseDate(articleId, entries, today) {
+    var last = null;
+    entries.forEach(function (e) {
+      if (e.articleId !== articleId || e.type !== 'purchase') { return; }
+      if (today && e.date > today) { return; }
+      if (last === null || e.date > last) { last = e.date; }
+    });
+    return last;
+  }
+
+  /* ---------- Nachkaufliste ---------- */
+
+  function dueReasons(article, entries, today) {
+    var reasons = [];
+    var last = lastPurchaseDate(article.id, entries, today);
+    var interval = intervalDays(article);
+    if (article.rhythm === 'once') {
+      if (last === null) { reasons.push({ code: 'rhythm', text: 'Einmalig zu Beginn: noch nicht gekauft' }); }
+    } else if (interval !== null) {
+      if (last === null) {
+        reasons.push({ code: 'rhythm', text: rhythmText(article) + ': noch nie gekauft' });
+      } else {
+        var age = daysBetween(last, today);
+        if (age >= interval) {
+          reasons.push({ code: 'rhythm', text: rhythmText(article) + ': zuletzt gekauft am ' + formatDate(last) + ' (vor ' + daysAgo(age) + ')' });
+        }
+      }
+    }
+    if (article.minStock !== null) {
+      var stock = stockOf(article.id, entries, today);
+      if (stock < article.minStock) {
+        reasons.push({ code: 'min', text: 'Bestand ' + fmtNumber(stock) + ' ' + article.unit + ' unter Mindestbestand ' + fmtNumber(article.minStock) + ' ' + article.unit });
+      }
+    }
+    return reasons;
+  }
+  function dueList(articles, entries, today) {
+    var out = [];
+    articles.forEach(function (a) {
+      var reasons = dueReasons(a, entries, today);
+      if (reasons.length) {
+        out.push({ article: a, stock: stockOf(a.id, entries, today), reasons: reasons });
+      }
+    });
+    return out;
+  }
+  function stockRows(articles, entries, today) {
+    return articles.map(function (a) {
+      var stock = stockOf(a.id, entries, today);
+      return { article: a, stock: stock, low: a.minStock !== null && stock < a.minStock };
+    });
+  }
+
+  /* ---------- Übersicht und Kosten ---------- */
+
+  function recentPurchases(articleId, entries, limit) {
+    var list = sortedEntries(entries).filter(function (e) { return e.articleId === articleId && e.type === 'purchase'; });
+    return list.reverse().slice(0, limit);
+  }
+  function summary(articles, entries, limit) {
+    var total = 0;
+    var rows = articles.map(function (a) {
+      var cents = 0, count = 0;
+      entries.forEach(function (e) {
+        if (e.articleId === a.id && e.type === 'purchase') { cents += priceToCents(e.price); count += 1; }
+      });
+      total += cents;
+      return { article: a, recent: recentPurchases(a.id, entries, limit), count: count, cents: cents };
+    });
+    return { rows: rows, totalCents: total };
+  }
+  function knownShops(entries) {
+    var seen = {}, out = [];
+    entries.forEach(function (e) { if (e.shop && !seen[e.shop]) { seen[e.shop] = true; out.push(e.shop); } });
+    return out.sort();
+  }
+
+  /* ---------- Beispieldaten ---------- */
+
+  function sampleArticles() {
+    function a(name, unit, category, rhythm, every) {
+      return { id: '', name: name, unit: unit, category: category, rhythm: rhythm, everyDays: every || null, minStock: null };
+    }
+    return [
+      a('Brötchen', 'Stück', 'frisch', 'daily'),
+      a('Handbrotteig', 'kg', 'frisch', 'daily'),
+      a('Lachs', 'kg', 'frisch', 'every', 2),
+      a('Schnittlauch', 'Bund', 'frisch', 'every', 3),
+      a('Salat', 'Stück', 'frisch', 'every', 2),
+      a('Champignons', 'kg', 'frisch', 'weekly'),
+      a('Lauch', 'Stück', 'frisch', 'weekly'),
+      a('Schmand', 'Packung', 'haltbar', 'once'),
+      a('Crème fraîche', 'Packung', 'haltbar', 'once'),
+      a('Kartoffelsalat', 'kg', 'frisch', 'once'),
+      a('Servietten', 'Packung', 'verbrauch', 'asneeded'),
+      a('Küchenrolle', 'Packung', 'verbrauch', 'asneeded'),
+      a('Handschuhe', 'Packung', 'verbrauch', 'asneeded')
+    ];
+  }
+  /* ergänzt nur Beispielartikel, deren Name noch nicht vorkommt */
+  function mergeSample(existing) {
+    var merged = existing.slice(), added = 0;
+    sampleArticles().forEach(function (s) {
+      var dup = merged.some(function (a) { return a.name.toLowerCase() === s.name.toLowerCase(); });
+      if (dup) { return; }
+      s.id = newId(merged, 'a');
+      merged.push(s);
+      added += 1;
+    });
+    return { articles: merged, added: added };
+  }
+
+  /* ---------- CSV (Trennzeichen ;, Anführungszeichen nach RFC 4180) ---------- */
+
+  function csvEscape(v) {
+    var s = v === null || v === undefined ? '' : String(v);
+    return /[";,\r\n]|^\s|\s$/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  function toCsv(columns, rows) {
+    var lines = [columns.join(';')];
+    rows.forEach(function (r) { lines.push(r.map(csvEscape).join(';')); });
+    return lines.join('\r\n') + '\r\n';
+  }
+  function detectDelimiter(text) {
+    var first = text.split(/\r\n|\n|\r/)[0];
+    if (first.indexOf(';') >= 0) { return ';'; }
+    return first.indexOf(',') >= 0 ? ',' : ';';
+  }
+  function parseCsv(text) {
+    text = String(text).replace(/^﻿/, '');
+    var delim = detectDelimiter(text);
+    var rows = [], row = [], field = '', inQuotes = false, quoted = false;
+    function endField() { row.push(field); field = ''; quoted = false; }
+    function endRow() {
+      endField();
+      if (!(row.length === 1 && row[0] === '' && !quoted)) { rows.push(row); }
+      row = [];
+    }
+    for (var i = 0; i < text.length; i++) {
+      var c = text.charAt(i);
+      if (inQuotes) {
+        if (c === '"') {
+          if (text.charAt(i + 1) === '"') { field += '"'; i++; } else { inQuotes = false; }
+        } else { field += c; }
+      } else if (c === '"' && field === '' && !quoted) {
+        inQuotes = true; quoted = true;
+      } else if (c === delim) {
+        endField();
+      } else if (c === '\r' || c === '\n') {
+        if (c === '\r' && text.charAt(i + 1) === '\n') { i++; }
+        endRow();
+      } else { field += c; }
+    }
+    if (inQuotes) { throw new Error('CSV: Anführungszeichen nicht geschlossen'); }
+    if (field !== '' || row.length > 0 || quoted) { endRow(); }
+    return rows;
+  }
+  /* liest die Tabelle als Objekte je Datensatz; Spaltenreihenfolge egal */
+  function readTable(text, columns) {
+    var rows;
+    try { rows = parseCsv(text); } catch (err) { return { records: [], errors: [err.message] }; }
+    if (!rows.length) { return { records: [], errors: ['CSV ist leer'] }; }
+    var header = rows[0].map(function (h) { return h.trim().toLowerCase(); });
+    var missing = columns.filter(function (c) { return header.indexOf(c) < 0; });
+    if (missing.length) { return { records: [], errors: ['Spalte(n) fehlen: ' + missing.join(', ')] }; }
+    var records = rows.slice(1).map(function (cells) {
+      var rec = {};
+      columns.forEach(function (c) { var v = cells[header.indexOf(c)]; rec[c] = v === undefined ? '' : v; });
+      return rec;
+    });
+    return { records: records, errors: [] };
+  }
+
+  function articlesToCsv(articles) {
+    return toCsv(ARTICLE_COLUMNS, articles.map(function (a) {
+      return [a.id, a.name, a.unit, a.category, a.rhythm,
+              a.everyDays === null ? '' : a.everyDays, a.minStock === null ? '' : a.minStock];
+    }));
+  }
+  function csvToArticles(text) {
+    var t = readTable(text, ARTICLE_COLUMNS);
+    if (t.errors.length) { return { articles: [], errors: t.errors }; }
+    var errors = [], articles = [], seen = {};
+    t.records.forEach(function (r, i) {
+      var a = makeArticle({ id: r.id, name: r.name, unit: r.unit, category: r.category,
+                            rhythm: r.rhythm, everyDays: r.every_days, minStock: r.min_stock });
+      var errs = validateArticle(a);
+      if (!a.id) { errs.push('ID fehlt'); } else if (seen[a.id]) { errs.push('ID doppelt: ' + a.id); }
+      seen[a.id] = true;
+      errs.forEach(function (m) { errors.push('Datensatz ' + (i + 1) + ': ' + m); });
+      articles.push(a);
+    });
+    return { articles: articles, errors: errors };
+  }
+  function entriesToCsv(entries) {
+    return toCsv(ENTRY_COLUMNS, entries.map(function (e) {
+      return [e.id, e.articleId, e.type, e.qty, e.date, e.shop, e.price === null ? '' : e.price];
+    }));
+  }
+  function csvToEntries(text, articles) {
+    var t = readTable(text, ENTRY_COLUMNS);
+    if (t.errors.length) { return { entries: [], errors: t.errors }; }
+    var errors = [], entries = [], seen = {};
+    t.records.forEach(function (r, i) {
+      var e = makeEntry({ id: r.id, articleId: r.article_id, type: r.type, qty: r.qty,
+                          date: r.date, shop: r.shop, price: r.price });
+      var errs = validateEntry(e, articles);
+      if (!e.id) { errs.push('ID fehlt'); } else if (seen[e.id]) { errs.push('ID doppelt: ' + e.id); }
+      seen[e.id] = true;
+      errs.forEach(function (m) { errors.push('Datensatz ' + (i + 1) + ': ' + m); });
+      entries.push(e);
+    });
+    return { entries: entries, errors: errors };
+  }
+
+  /* gespeicherte Daten prüfen; Ungültiges wird verworfen und gezählt */
+  function sanitizeData(obj) {
+    var dropped = 0, articles = [], entries = [];
+    var rawA = obj && Array.isArray(obj.articles) ? obj.articles : [];
+    var rawE = obj && Array.isArray(obj.entries) ? obj.entries : [];
+    rawA.forEach(function (r) {
+      var a = makeArticle(r || {});
+      if (a.id && !articles.some(function (x) { return x.id === a.id; }) && !validateArticle(a).length) { articles.push(a); } else { dropped++; }
+    });
+    rawE.forEach(function (r) {
+      var e = makeEntry(r || {});
+      if (e.id && !entries.some(function (x) { return x.id === e.id; }) && !validateEntry(e, articles).length) { entries.push(e); } else { dropped++; }
+    });
+    return { articles: articles, entries: entries, dropped: dropped };
+  }
+
+  /* ---------- Darstellung als HTML-Text (Werte werden maskiert) ---------- */
+
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function renderOptions(list, selected) {
+    return list.map(function (x) {
+      return '<option value="' + esc(x.id) + '"' + (x.id === selected ? ' selected' : '') + '>' + esc(x.label !== undefined ? x.label : x.name) + '</option>';
+    }).join('');
+  }
+  function renderDue(items) {
+    if (!items.length) { return '<p class="empty">Für diesen Tag ist nichts fällig.</p>'; }
+    var html = '';
+    CATEGORIES.forEach(function (cat) {
+      var group = items.filter(function (i) { return i.article.category === cat.id; });
+      if (!group.length) { return; }
+      html += '<h3>' + esc(cat.label) + '</h3><ul class="list">';
+      group.forEach(function (i) {
+        html += '<li><div class="row"><div><strong>' + esc(i.article.name) + '</strong> <span class="muted">Bestand ' +
+          esc(fmtNumber(i.stock)) + ' ' + esc(i.article.unit) + '</span></div>' +
+          '<button type="button" class="small" data-act="buy" data-id="' + esc(i.article.id) + '">Einkauf erfassen</button></div>' +
+          '<ul class="reasons">' + i.reasons.map(function (r) { return '<li>' + esc(r.text) + '</li>'; }).join('') + '</ul></li>';
+      });
+      html += '</ul>';
+    });
+    return html;
+  }
+  function renderStock(rows) {
+    if (!rows.length) { return '<p class="empty">Noch keine Artikel. Unter „Artikel“ anlegen oder Beispielartikel laden.</p>'; }
+    return '<ul class="list">' + rows.map(function (r) {
+      var min = r.article.minStock === null ? '' : ' <span class="muted">(Mindestbestand ' + esc(fmtNumber(r.article.minStock)) + ')</span>';
+      return '<li><div class="row"><div><strong>' + esc(r.article.name) + '</strong>' + min + '</div><div' + (r.low ? ' class="low"' : '') + '>' +
+        esc(fmtNumber(r.stock)) + ' ' + esc(r.article.unit) + '</div></div></li>';
+    }).join('') + '</ul>';
+  }
+  function renderSummary(s) {
+    var html = '<div class="total">Summe aller Einkäufe: ' + esc(formatEuro(s.totalCents)) + '</div>';
+    var rows = s.rows.filter(function (r) { return r.count > 0; });
+    if (!rows.length) { return html + '<p class="empty">Noch keine Einkäufe erfasst.</p>'; }
+    return html + '<ul class="list">' + rows.map(function (r) {
+      return '<li><div class="row"><strong>' + esc(r.article.name) + '</strong><span class="muted">' + r.count + (r.count === 1 ? ' Einkauf' : ' Einkäufe') + ' · ' + esc(formatEuro(r.cents)) + '</span></div>' +
+        '<ul class="muted">' + r.recent.map(function (e) {
+          return '<li>' + esc(formatDate(e.date)) + ' · ' + esc(fmtNumber(e.qty)) + ' ' + esc(r.article.unit) +
+            (e.shop ? ' · ' + esc(e.shop) : '') + ' · ' + (e.price === null ? 'ohne Preis' : esc(formatEuro(priceToCents(e.price)))) + '</li>';
+        }).join('') + '</ul></li>';
+    }).join('') + '</ul>';
+  }
+  function renderArticles(articles) {
+    if (!articles.length) { return '<p class="empty">Noch keine Artikel.</p>'; }
+    return '<ul class="list">' + articles.map(function (a) {
+      return '<li><div class="row"><div><strong>' + esc(a.name) + '</strong> <span class="muted">' + esc(a.unit) + ' · ' + esc(labelOf(CATEGORIES, a.category)) +
+        ' · ' + esc(rhythmText(a)) + (a.minStock === null ? '' : ' · Mindestbestand ' + esc(fmtNumber(a.minStock))) + '</span></div>' +
+        '<div class="actions"><button type="button" class="small" data-act="edit-article" data-id="' + esc(a.id) + '">Bearbeiten</button>' +
+        '<button type="button" class="small danger" data-act="del-article" data-id="' + esc(a.id) + '">Löschen</button></div></div></li>';
+    }).join('') + '</ul>';
+  }
+  function renderEntries(entries, articles, limit) {
+    var list = sortedEntries(entries).reverse().slice(0, limit);
+    if (!list.length) { return '<p class="empty">Noch nichts erfasst.</p>'; }
+    return '<ul class="list">' + list.map(function (e) {
+      var a = articles.filter(function (x) { return x.id === e.articleId; })[0];
+      var label = e.type === 'count' ? 'Zählung' : labelOf(ENTRY_TYPES, e.type);
+      return '<li><div class="row"><div><strong>' + esc(a ? a.name : e.articleId) + '</strong> <span class="muted">' + esc(label) + ' ' +
+        esc(fmtNumber(e.qty)) + ' ' + esc(a ? a.unit : '') + ' · ' + esc(formatDate(e.date)) +
+        (e.shop ? ' · ' + esc(e.shop) : '') + (e.price !== null ? ' · ' + esc(formatEuro(priceToCents(e.price))) : '') + '</span></div>' +
+        '<button type="button" class="small danger" data-act="del-entry" data-id="' + esc(e.id) + '">Löschen</button></div></li>';
+    }).join('') + '</ul>';
+  }
+
+  return {
+    CATEGORIES: CATEGORIES, RHYTHMS: RHYTHMS, ENTRY_TYPES: ENTRY_TYPES,
+    ARTICLE_COLUMNS: ARTICLE_COLUMNS, ENTRY_COLUMNS: ENTRY_COLUMNS,
+    isValidDate: isValidDate, daysBetween: daysBetween, todayString: todayString, formatDate: formatDate,
+    parseNumber: parseNumber, fmtNumber: fmtNumber, formatEuro: formatEuro, priceToCents: priceToCents, newId: newId,
+    makeArticle: makeArticle, validateArticle: validateArticle, rhythmText: rhythmText,
+    makeEntry: makeEntry, validateEntry: validateEntry, sortedEntries: sortedEntries,
+    stockOf: stockOf, lastPurchaseDate: lastPurchaseDate, dueReasons: dueReasons, dueList: dueList, stockRows: stockRows,
+    recentPurchases: recentPurchases, summary: summary, knownShops: knownShops,
+    sampleArticles: sampleArticles, mergeSample: mergeSample,
+    parseCsv: parseCsv, articlesToCsv: articlesToCsv, csvToArticles: csvToArticles,
+    entriesToCsv: entriesToCsv, csvToEntries: csvToEntries, sanitizeData: sanitizeData,
+    esc: esc, renderOptions: renderOptions, renderDue: renderDue, renderStock: renderStock,
+    renderSummary: renderSummary, renderArticles: renderArticles, renderEntries: renderEntries
+  };
+})();
+</script>
+
+<script id="ui">
+(function () {
+  'use strict';
+  var L = StockLogic;
+  var STORAGE_KEY = 'schlossweihnacht-vorrat-v1';
+  var state = { articles: [], entries: [] };
+  var currentTab = 'due';
+
+  function $(id) { return document.getElementById(id); }
+
+  function showMsg(text, kind) {
+    $('msg').textContent = text;
+    $('msg').className = kind || '';
+  }
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) { return; }
+      var data = L.sanitizeData(JSON.parse(raw));
+      state.articles = data.articles;
+      state.entries = data.entries;
+      if (data.dropped) { showMsg(data.dropped + ' ungültige gespeicherte Datensätze wurden verworfen.', 'err'); }
+    } catch (err) {
+      showMsg('Gespeicherte Daten konnten nicht gelesen werden: ' + err.message, 'err');
+    }
+  }
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, articles: state.articles, entries: state.entries }));
+    } catch (err) {
+      showMsg('Speichern im Browser nicht möglich – bitte CSV exportieren: ' + err.message, 'err');
+    }
+  }
+
+  function currentDay() {
+    var v = $('today').value;
+    return L.isValidDate(v) ? v : L.todayString(new Date());
+  }
+
+  function showTab(name) {
+    currentTab = name;
+    var panels = document.querySelectorAll('[data-tab-panel]');
+    for (var i = 0; i < panels.length; i++) {
+      panels[i].hidden = panels[i].getAttribute('data-tab-panel') !== name;
+    }
+    var buttons = document.querySelectorAll('#nav button');
+    for (var j = 0; j < buttons.length; j++) {
+      buttons[j].setAttribute('aria-current', buttons[j].getAttribute('data-id') === name ? 'true' : 'false');
+    }
+  }
+
+  function updateEntryForm() {
+    var isPurchase = $('entryType').value === 'purchase';
+    var boxes = document.querySelectorAll('[data-purchase-only]');
+    for (var i = 0; i < boxes.length; i++) { boxes[i].hidden = !isPurchase; }
+    $('entryQtyLabel').textContent = $('entryType').value === 'count' ? 'Neuer Bestand (gezählt)' : 'Menge';
+  }
+  function updateArticleForm() {
+    $('everyBox').hidden = $('articleRhythm').value !== 'every';
+  }
+
+  function render() {
+    var today = currentDay();
+    var due = L.dueList(state.articles, state.entries, today);
+    $('dueHint').textContent = 'Stichtag ' + L.formatDate(today) + ' – ' + due.length + ' Artikel fällig.';
+    $('dueList').innerHTML = L.renderDue(due);
+    $('stockList').innerHTML = L.renderStock(L.stockRows(state.articles, state.entries, today));
+    $('summary').innerHTML = L.renderSummary(L.summary(state.articles, state.entries, 3));
+    $('articleList').innerHTML = L.renderArticles(state.articles);
+    $('entryList').innerHTML = L.renderEntries(state.entries, state.articles, 15);
+    var selected = $('entryArticle').value;
+    $('entryArticle').innerHTML = L.renderOptions(state.articles, selected);
+    $('shopList').innerHTML = L.knownShops(state.entries).map(function (s) { return '<option value="' + L.esc(s) + '">'; }).join('');
+  }
+
+  function resetArticleForm() {
+    $('articleId').value = '';
+    $('articleName').value = '';
+    $('articleUnit').value = '';
+    $('articleCategory').value = L.CATEGORIES[0].id;
+    $('articleRhythm').value = L.RHYTHMS[0].id;
+    $('articleEvery').value = '';
+    $('articleMin').value = '';
+    $('articleCancel').hidden = true;
+    updateArticleForm();
+  }
+
+  function download(name, text) {
+    var blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  function readFile(input, onText) {
+    var file = input.files && input.files[0];
+    if (!file) { return; }
+    var reader = new FileReader();
+    reader.onload = function () { onText(String(reader.result)); input.value = ''; };
+    reader.onerror = function () { showMsg('Datei konnte nicht gelesen werden.', 'err'); };
+    reader.readAsText(file);
+  }
+
+  function onSubmitEntry(ev) {
+    ev.preventDefault();
+    var entry = L.makeEntry({
+      id: L.newId(state.entries, 'e'), articleId: $('entryArticle').value, type: $('entryType').value,
+      qty: $('entryQty').value, date: $('entryDate').value, shop: $('entryShop').value, price: $('entryPrice').value
+    });
+    var errors = L.validateEntry(entry, state.articles);
+    if (errors.length) { showMsg(errors.join('; '), 'err'); return; }
+    state.entries.push(entry);
+    save();
+    $('entryQty').value = '';
+    $('entryPrice').value = '';
+    render();
+    showMsg('Gespeichert.', 'ok');
+  }
+
+  function onSubmitArticle(ev) {
+    ev.preventDefault();
+    var id = $('articleId').value;
+    var article = L.makeArticle({
+      id: id || L.newId(state.articles, 'a'), name: $('articleName').value, unit: $('articleUnit').value,
+      category: $('articleCategory').value, rhythm: $('articleRhythm').value,
+      everyDays: $('articleEvery').value, minStock: $('articleMin').value
+    });
+    var errors = L.validateArticle(article);
+    if (errors.length) { showMsg(errors.join('; '), 'err'); return; }
+    if (id) {
+      state.articles = state.articles.map(function (a) { return a.id === id ? article : a; });
+    } else {
+      state.articles.push(article);
+    }
+    save();
+    resetArticleForm();
+    render();
+    showMsg('Artikel gespeichert.', 'ok');
+  }
+
+  function editArticle(id) {
+    var a = state.articles.filter(function (x) { return x.id === id; })[0];
+    if (!a) { return; }
+    $('articleId').value = a.id;
+    $('articleName').value = a.name;
+    $('articleUnit').value = a.unit;
+    $('articleCategory').value = a.category;
+    $('articleRhythm').value = a.rhythm;
+    $('articleEvery').value = a.everyDays === null ? '' : String(a.everyDays);
+    $('articleMin').value = a.minStock === null ? '' : String(a.minStock);
+    $('articleCancel').hidden = false;
+    updateArticleForm();
+  }
+
+  function onClick(ev) {
+    var el = ev.target && ev.target.closest ? ev.target.closest('[data-act]') : null;
+    if (!el) { return; }
+    var act = el.getAttribute('data-act');
+    var id = el.getAttribute('data-id');
+    if (act === 'tab') {
+      showTab(id);
+    } else if (act === 'buy') {
+      $('entryArticle').value = id;
+      $('entryType').value = 'purchase';
+      $('entryDate').value = currentDay();
+      updateEntryForm();
+      showTab('entry');
+    } else if (act === 'edit-article') {
+      editArticle(id);
+    } else if (act === 'cancel-edit') {
+      resetArticleForm();
+    } else if (act === 'del-article') {
+      if (!confirm('Artikel und alle zugehörigen Erfassungen löschen?')) { return; }
+      state.articles = state.articles.filter(function (a) { return a.id !== id; });
+      state.entries = state.entries.filter(function (e) { return e.articleId !== id; });
+      save();
+      render();
+    } else if (act === 'del-entry') {
+      state.entries = state.entries.filter(function (e) { return e.id !== id; });
+      save();
+      render();
+    } else if (act === 'sample') {
+      var merged = L.mergeSample(state.articles);
+      state.articles = merged.articles;
+      save();
+      render();
+      showMsg(merged.added + ' Beispielartikel ergänzt.', 'ok');
+    } else if (act === 'export-articles') {
+      download('artikelstamm-' + currentDay() + '.csv', L.articlesToCsv(state.articles));
+    } else if (act === 'export-entries') {
+      download('einkaeufe-' + currentDay() + '.csv', L.entriesToCsv(state.entries));
+    } else if (act === 'clear-all') {
+      if (!confirm('Wirklich alle Artikel und Erfassungen löschen?')) { return; }
+      state.articles = [];
+      state.entries = [];
+      save();
+      render();
+      showMsg('Alle Daten gelöscht.', 'ok');
+    }
+  }
+
+  function onImportArticles() {
+    readFile($('importArticles'), function (text) {
+      var res = L.csvToArticles(text);
+      if (res.errors.length) { showMsg('Import abgebrochen: ' + res.errors.slice(0, 3).join('; '), 'err'); return; }
+      if (!confirm(res.articles.length + ' Artikel importieren und den Artikelstamm ersetzen?')) { return; }
+      state.articles = res.articles;
+      state.entries = state.entries.filter(function (e) { return res.articles.some(function (a) { return a.id === e.articleId; }); });
+      save();
+      render();
+      showMsg(res.articles.length + ' Artikel importiert.', 'ok');
+    });
+  }
+  function onImportEntries() {
+    readFile($('importEntries'), function (text) {
+      var res = L.csvToEntries(text, state.articles);
+      if (res.errors.length) { showMsg('Import abgebrochen: ' + res.errors.slice(0, 3).join('; '), 'err'); return; }
+      if (!confirm(res.entries.length + ' Erfassungen importieren und alle bisherigen ersetzen?')) { return; }
+      state.entries = res.entries;
+      save();
+      render();
+      showMsg(res.entries.length + ' Erfassungen importiert.', 'ok');
+    });
+  }
+
+  function init() {
+    $('entryType').innerHTML = L.renderOptions(L.ENTRY_TYPES, 'purchase');
+    $('articleCategory').innerHTML = L.renderOptions(L.CATEGORIES, L.CATEGORIES[0].id);
+    $('articleRhythm').innerHTML = L.renderOptions(L.RHYTHMS, L.RHYTHMS[0].id);
+    $('today').value = L.todayString(new Date());
+    $('entryDate').value = $('today').value;
+    load();
+    document.addEventListener('click', onClick);
+    $('today').addEventListener('change', function () { $('entryDate').value = currentDay(); render(); });
+    $('entryType').addEventListener('change', updateEntryForm);
+    $('articleRhythm').addEventListener('change', updateArticleForm);
+    $('entryForm').addEventListener('submit', onSubmitEntry);
+    $('articleForm').addEventListener('submit', onSubmitArticle);
+    $('importArticles').addEventListener('change', onImportArticles);
+    $('importEntries').addEventListener('change', onImportEntries);
+    updateEntryForm();
+    updateArticleForm();
+    showTab(currentTab);
+    render();
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

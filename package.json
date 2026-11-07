@@ -1,0 +1,9 @@
+{
+  "name": "schlossweihnacht-einkaufsrechner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Einkaufs- und Vorratsliste für den Stand auf der Schlossweihnacht (eine statische HTML-Datei)",
+  "scripts": {
+    "test": "node tests/static-check.js && node --test tests/logic.test.js tests/ui-smoke.test.js"
+  }
+}
