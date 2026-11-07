@@ -323,3 +323,122 @@ test('Darstellung: Werte werden maskiert, Fälligkeit zeigt Grund je Eintrag', (
   assert.ok(!L.renderEntries([buy('a1', '2026-12-01', 1, 1, '<b>x</b>')], [evil], 5).includes('<b>'));
   assert.ok(!L.renderSummary(L.summary([evil], [buy('a1', '2026-12-01', 1, 1, '<b>x</b>')], 3)).includes('<b>'));
 });
+
+/* ---------- Bestellplan (OPS-T-0303) ---------- */
+const fixture = require('node:fs').readFileSync(require('node:path').join(__dirname, 'fixtures', 'bestellplan.csv'), 'utf8');
+const importPlan = () => {
+  const r = L.csvToOrder(fixture, { articles: [], entries: [] });
+  assert.deepEqual(r.errors, []);
+  return r;
+};
+function canonicalPlan(r) {
+  const byId = (a, b) => a.id.localeCompare(b.id);
+  return {
+    articles: r.articles.slice().sort(byId),
+    suppliers: r.order.suppliers.slice().sort(byId),
+    days: r.order.days,
+    assignments: r.order.assignments.slice().sort((a, b) => a.articleId.localeCompare(b.articleId)),
+    quantities: r.order.quantities.slice().sort((a, b) => JSON.stringify([a.articleId, a.dayId]).localeCompare(JSON.stringify([b.articleId, b.dayId])))
+  };
+}
+
+test('AC01: Tabellenfixture, leere Zellen, Einheiten und Summen; Vorlauf 0 / 1 je Lieferant', () => {
+  const r = importPlan();
+  assert.equal(r.articles.length, 18);
+  assert.equal(r.order.days.length, 15);
+  assert.equal(r.order.days[3].note, 'Regen');
+  assert.equal(r.order.days[5].note, 'Vormittag Regen');
+  const bread = r.articles.find(a => a.name === 'Knaxx Brötchen');
+  assert.equal(L.quantityAt(r.order, bread.id, 'd11'), 200);
+  assert.equal(L.quantityAt(r.order, bread.id, 'd1'), 0);
+  const ham = r.articles.find(a => a.name === 'Kaminrauchschinken');
+  assert.equal(L.quantityAt(r.order, ham.id, 'd2'), 40);
+  const rows = day => L.todayOrders(r.articles, r.order, day).map(g => [g.supplier.name, g.items.map(i => [i.article.name, i.qty, i.day.date, i.pack])]);
+  assert.deepEqual(rows('2026-12-03'), [['Metro', [
+    ['Lachs 10kg', 50, '2026-12-04', '10 kg'],
+    ['Wildkräutersalat kg', 3, '2026-12-04', 'kg'],
+    ['Schnittlauch Bund', 3, '2026-12-04', 'Bund']
+  ]]]);
+  assert.deepEqual(rows('2026-12-04'), [
+    ['Bäcker', [['Handbrotteig in kg', 80, '2026-12-04', 'kg'], ['Knaxx Brötchen', 170, '2026-12-04', 'Stück']]],
+    ['Gastromaster', [['Gouda gerieben 10x1kg', 100, '2026-12-05', '10x1kg'], ['Grana Padano gerieben 10x1kg', 20, '2026-12-05', '10x1kg'], ['Lauch fein Pck 2,5kg', 10, '2026-12-05', 'Pck 2,5kg']]]
+  ]);
+  assert.equal(L.todayOrders(r.articles, r.order, '2026-12-15').length, 0);
+});
+
+test('AC02: CSV-Rundlauf aller Lieferanten, Gebinde, IDs, Artikelmetadaten, Tage, Notizen und Mengen', () => {
+  const r = importPlan();
+  r.articles[0].name = 'Lachs; "Spezial"\nfrisch';
+  r.articles[0].category = 'verbrauch'; r.articles[0].rhythm = 'every'; r.articles[0].everyDays = 2; r.articles[0].minStock = 0;
+  r.order.suppliers[0].name = 'Markt; "Süd"';
+  r.order.days[0].name = 'Aufbau; "Start"'; r.order.days[0].note = 'Regen\nspäter Sonne';
+  r.order.assignments[0].pack = 'Kiste; 2,5 kg';
+  r.articles[1].name = 'Wetter'; r.articles[2].name = 'Lieferant: Sonderartikel';
+  const csv = L.orderToCsv(r.articles, r.order);
+  const back = L.csvToOrder(csv, { articles: [], entries: [] });
+  assert.deepEqual(back.errors, []);
+  assert.deepEqual(canonicalPlan(back), canonicalPlan(r));
+  const empty = { articles: [], entries: [], order: L.blankOrder([]) };
+  assert.deepEqual(canonicalPlan(L.csvToOrder(L.orderToCsv([], empty.order), empty)), canonicalPlan(empty));
+});
+
+test('AC03: v1 Artikel und Erfassungen bleiben beim Import unverändert verfügbar', () => {
+  const a = art({ id: 'old', name: 'Küchenrolle', category: 'verbrauch', minStock: 2 });
+  const e = { id: 'e1', articleId: a.id, type: 'purchase', qty: 4, date: '2026-12-01', shop: 'Markt', price: 10 };
+  const v1 = { articles: [a], entries: [e] };
+  const before = JSON.stringify(v1);
+  const r = L.csvToOrder(fixture, v1);
+  assert.deepEqual(r.errors, []);
+  assert.equal(JSON.stringify(v1), before);
+  assert.deepEqual(r.articles.find(x => x.id === 'old'), a);
+  assert.deepEqual(r.entries, [e]);
+  assert.equal(L.stockOf('old', r.entries), 4);
+  assert.equal(r.order.assignments.find(x => x.articleId === 'old').pack, a.unit);
+  assert.deepEqual(L.validateOrder(L.syncOrder(L.blankOrder(v1.articles), v1.articles), v1.articles), []);
+});
+
+test('SC06: Kalenderarithmetik über Jahreswechsel und Schalttag; Verschiebung erhält IDs, Notizen und Mengen', () => {
+  assert.equal(L.addDays('2027-01-01', -1), '2026-12-31');
+  assert.equal(L.addDays('2028-02-28', 1), '2028-02-29');
+  const r = importPlan(), original = JSON.stringify(r);
+  const days = L.shiftDays(r.order.days.slice().reverse(), '2027-12-01');
+  assert.equal(days.find(d => d.id === 'd1').date, '2027-12-01');
+  assert.equal(days.find(d => d.id === 'd4').note, 'Regen');
+  const next = { ...r.order, days };
+  assert.deepEqual(L.todayOrders(r.articles, next, '2027-12-03').map(g => g.items.map(i => i.qty)), [[50, 3, 3]]);
+  assert.equal(JSON.stringify(r), original);
+  assert.throws(() => L.shiftDays(r.order.days, '2026-02-30'));
+});
+
+test('EB01: CSV-Fehler sind atomar; ungültige Menge, Datum, IDs und Vorlauf werden abgelehnt', () => {
+  const r = importPlan();
+  for (const csv of [
+    fixture.replace('100+100', '100+foo'), fixture.replace('2026-12-01', '2026-02-30'),
+    fixture.replace('Lieferant: Metro;;1', 'Lieferant: Metro;;-1'),
+    fixture.replace('Lieferant: Metro;;1', 'Lieferant: Metro;;1,5'), fixture.replace('40kg', '40xyz'),
+    fixture.replace('Wetter;;;', 'Wetter;;'), 'kaputt', fixture.replace('Lachs 10kg', '"offen')
+  ]) {
+    const before = JSON.stringify(r);
+    assert.ok(L.csvToOrder(csv, r).errors.length > 0, csv.slice(0, 80));
+    assert.equal(JSON.stringify(r), before);
+  }
+  for (const qty of ['-1', '1+', '+1', 'Infinity', '1e3', '1+ +2']) { assert.throws(() => L.parseQuantity(qty)); }
+  assert.equal(L.parseQuantity('2,5 + 3,5kg'), 6);
+  const bad = structuredClone(r.order); bad.days[1].id = bad.days[0].id;
+  assert.ok(L.validateOrder(bad, r.articles).length > 0);
+  const changed = L.setQuantity(r.order, r.articles[0].id, 'd1', '10+20');
+  assert.equal(L.quantityAt(changed, r.articles[0].id, 'd1'), 30);
+  assert.equal(L.quantityAt(r.order, r.articles[0].id, 'd1'), 0);
+});
+
+test('Bestellplan rendert maskierte Texte und Handy-/Tabellenansichten', () => {
+  const r = importPlan();
+  r.articles[0].name = '<img onerror=x>';
+  r.order.days[3].note = '<script>x</script>';
+  for (const markup of [L.renderOrders(L.todayOrders(r.articles, r.order, '2026-12-03')), L.renderMatrix(r.articles, r.order, 'all', '')]) {
+    assert.doesNotMatch(markup, /<img|<script>/);
+    assert.match(markup, /&lt;img/);
+  }
+  assert.equal((L.renderMatrix(r.articles, r.order, 'day', 'd4').match(/data-quantity-article=/g) || []).length, 18);
+  assert.equal((L.renderMatrix(r.articles, r.order, 'article', r.articles[0].id).match(/data-quantity-article=/g) || []).length, 15);
+});

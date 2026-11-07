@@ -39,6 +39,12 @@
   .low { color: var(--warn); font-weight: 600; }
   .empty { color: var(--muted); }
   .actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .6rem; }
+  .matrix { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid var(--line); padding: .4rem; text-align: left; }
+  td input { width: 7rem; }
+  .matrix th:first-child { position: sticky; left: 0; background: var(--card); }
+  @media (min-width: 64rem) { header, main { max-width: 90rem; } }
   #msg { min-height: 1.5rem; margin: .25rem 0 .5rem; font-weight: 600; }
   #msg.ok { color: var(--accent); } #msg.err { color: var(--err); }
   #saveError { margin: .25rem 0 .5rem; padding: .5rem .7rem; border: 2px solid var(--err); border-radius: 8px; color: var(--err); font-weight: 600; background: var(--card); }
@@ -53,7 +59,9 @@
     <input type="date" id="today">
   </div>
   <nav id="nav">
-    <button type="button" data-act="tab" data-id="due">Heute</button>
+    <button type="button" data-act="tab" data-id="due">Heute bestellen</button>
+    <button type="button" data-act="tab" data-id="plan">Bestellplan</button>
+    <button type="button" data-act="tab" data-id="setup">Lieferanten &amp; Tage</button>
     <button type="button" data-act="tab" data-id="entry">Erfassen</button>
     <button type="button" data-act="tab" data-id="stock">Bestand</button>
     <button type="button" data-act="tab" data-id="overview">Übersicht</button>
@@ -66,9 +74,45 @@
 <main>
 
 <section data-tab-panel="due">
-  <h2>Heute nachkaufen</h2>
+  <h2>Heute bestellen</h2>
+  <div id="orderDue"></div>
+  <h3>Nach Rhythmus / Mindestbestand</h3>
   <p class="muted" id="dueHint"></p>
   <div id="dueList"></div>
+</section>
+
+<section data-tab-panel="setup" hidden>
+  <h2>Lieferanten und Veranstaltungstage</h2>
+  <form id="supplierForm" class="form">
+    <input type="hidden" id="supplierId">
+    <div><label for="supplierName">Lieferant</label><input id="supplierName" required></div>
+    <div><label for="supplierLead">Bestellvorlauf (Kalendertage)</label><input id="supplierLead" type="number" min="0" step="1" value="1" required></div>
+    <div class="actions"><button class="primary">Lieferant speichern</button><button type="button" data-act="reset-supplier">Neu / Abbrechen</button></div>
+  </form>
+  <div id="supplierList"></div>
+  <h3>Veranstaltungstage</h3>
+  <form id="dayForm" class="form">
+    <input type="hidden" id="dayId">
+    <div><label for="dayDate">Datum</label><input id="dayDate" type="date" required></div>
+    <div><label for="dayName">Bezeichnung (auch Pause, Aufbau, Abbau)</label><input id="dayName" required></div>
+    <div><label for="dayNote">Notiz / Wetter</label><input id="dayNote"></div>
+    <div class="actions"><button class="primary">Tag speichern</button><button type="button" data-act="reset-day">Neu / Abbrechen</button></div>
+  </form>
+  <div id="dayList"></div>
+  <form id="shiftForm" class="form">
+    <div><label for="shiftStart">Alle Tage verschieben: neues Datum des ersten Tages</label><input id="shiftStart" type="date" required></div>
+    <div><button>Termine verschieben (Mengen bleiben)</button></div>
+  </form>
+</section>
+
+<section data-tab-panel="plan" hidden>
+  <h2>Bestellplan</h2>
+  <p class="muted">Artikel unter „Artikel“ anlegen. Lieferant und Gebinde dort zuordnen. Mengen beziehen sich auf die angegebene Einheit; das Gebinde ist eine zusätzliche Bestellhilfe. Jede Änderung wird sofort gespeichert.</p>
+  <div class="form">
+    <div><label for="planMode">Ansicht</label><select id="planMode"><option value="day">Ein Tag (Handy)</option><option value="article">Ein Artikel (Handy)</option><option value="all">Ganze Tabelle (Rechner)</option></select></div>
+    <div><label for="planFocus">Tag / Artikel auswählen</label><select id="planFocus"></select></div>
+  </div>
+  <div id="planMatrix" class="matrix"></div>
 </section>
 
 <section data-tab-panel="entry" hidden>
@@ -103,6 +147,8 @@
     <div class="full"><label for="articleName">Name</label><input id="articleName" type="text" required></div>
     <div><label for="articleUnit">Einheit (z. B. Stück, kg, Kiste, Packung)</label><input id="articleUnit" type="text" list="unitList" required>
       <datalist id="unitList"><option value="Stück"><option value="kg"><option value="Kiste"><option value="Packung"><option value="Bund"></datalist></div>
+    <div><label for="articleSupplier">Lieferant (Vorlauf unter „Lieferanten &amp; Tage“)</label><select id="articleSupplier"></select></div>
+    <div><label for="articlePack">Gebinde (Freitext)</label><input id="articlePack" placeholder="z. B. Kiste 3 kg"></div>
     <div><label for="articleCategory">Kategorie</label><select id="articleCategory"></select></div>
     <div><label for="articleRhythm">Bestellrhythmus</label><select id="articleRhythm"></select></div>
     <div id="everyBox" hidden><label for="articleEvery">Alle wie viele Tage (N)?</label><input id="articleEvery" type="text" inputmode="numeric"></div>
@@ -119,6 +165,11 @@
 
 <section data-tab-panel="data" hidden>
   <h2>Daten</h2>
+  <h3>Bestellplan als Tabelle</h3>
+  <p class="muted">Lieferantengruppen, Artikelzeilen, Veranstaltungstage als Spalten und Wetter als Notizzeile. Der Import ersetzt den Bestellplan, ergänzt oder aktualisiert Artikel; Erfassungen bleiben erhalten. Vorher zur Sicherheit alle drei CSV-Dateien exportieren.</p>
+  <div class="actions"><button type="button" data-act="export-plan">Bestellplan exportieren</button></div>
+  <label for="importPlan">Bestellplan importieren (ersetzt Lieferanten, Tage und Mengen)</label><input id="importPlan" type="file" accept=".csv,text/csv">
+  <h3>Vorratsliste</h3>
   <p class="muted">Die Daten liegen nur in diesem Browser. Zum Sichern und für andere Geräte als CSV exportieren und dort importieren (erst Artikelstamm, dann Einkäufe).</p>
   <div class="actions">
     <button type="button" data-act="export-articles">Artikelstamm exportieren</button>
@@ -597,7 +648,201 @@ var StockLogic = (function () {
     }).join('') + '</ul>';
   }
 
+
+  /* ---------- Bestellplan v2 (Artikel-IDs der Vorratsliste bleiben stabil) ---------- */
+  function blankOrder(articles) {
+    return { suppliers: [{ id: 's0', name: 'Nicht zugeordnet', lead: 1 }], days: [],
+      assignments: articles.map(function (a) { return { articleId: a.id, supplierId: 's0', pack: a.unit }; }), quantities: [] };
+  }
+  function syncOrder(order, articles) {
+    var out = JSON.parse(JSON.stringify(order));
+    if (!out.suppliers.length) { out.suppliers.push({ id: 's0', name: 'Nicht zugeordnet', lead: 1 }); }
+    out.assignments = articles.map(function (a) {
+      return out.assignments.find(function (x) { return x.articleId === a.id; }) ||
+        { articleId: a.id, supplierId: out.suppliers[0].id, pack: a.unit };
+    });
+    out.quantities = out.quantities.filter(function (q) { return hasId(articles, q.articleId); });
+    return out;
+  }
+  function validateOrder(o, articles) {
+    var errors = [];
+    if (!o || !['suppliers', 'days', 'assignments', 'quantities'].every(function (k) { return Array.isArray(o[k]); })) {
+      return ['Bestellplan unvollständig'];
+    }
+    function unique(rows, key, title) {
+      var ids = new Set();
+      rows.forEach(function (r) {
+        var id = r && r[key];
+        if (typeof id !== 'string' || !id || ids.has(id)) { errors.push(title + ': ID fehlt oder doppelt'); }
+        ids.add(id);
+      });
+    }
+    unique(o.suppliers, 'id', 'Lieferant'); unique(o.days, 'id', 'Tag'); unique(o.assignments, 'articleId', 'Zuordnung');
+    o.suppliers.forEach(function (s) {
+      if (!s || typeof s.name !== 'string' || !s.name.trim() || !Number.isInteger(s.lead) || s.lead < 0 || s.lead > 365) { errors.push('Lieferant: Name / Vorlauf ungültig (0–365)'); }
+    });
+    o.days.forEach(function (d) {
+      if (!d || !isValidDate(d.date) || typeof d.name !== 'string' || !d.name.trim() || typeof d.note !== 'string') { errors.push('Tag: Datum / Bezeichnung / Notiz ungültig'); }
+    });
+    o.assignments.forEach(function (a) {
+      if (!a || !hasId(articles, a.articleId) || !hasId(o.suppliers, a.supplierId) || typeof a.pack !== 'string' || !a.pack.trim()) { errors.push('Artikel: Lieferant / Gebinde ungültig'); }
+    });
+    var keys = new Set();
+    o.quantities.forEach(function (q) {
+      var key = q && JSON.stringify([q.articleId, q.dayId]);
+      if (!q || !hasId(articles, q.articleId) || !hasId(o.days, q.dayId) || !Number.isFinite(q.qty) || q.qty < 0 || keys.has(key)) { errors.push('Bestellmenge ungültig oder doppelt'); }
+      keys.add(key);
+    });
+    return errors;
+  }
+  function addDays(date, delta) {
+    if (!isValidDate(date) || !Number.isInteger(delta)) { throw new Error('Datum / Verschiebung ungültig'); }
+    var next = new Date((dayNumber(date) + delta) * 86400000).toISOString().slice(0, 10);
+    if (!isValidDate(next)) { throw new Error('Datum außerhalb des erlaubten Bereichs'); }
+    return next;
+  }
+  function shiftDays(days, firstDate) {
+    if (!days.length || !isValidDate(firstDate)) { throw new Error('Tage / neues Datum fehlen'); }
+    var first = days.reduce(function (v, d) { return d.date < v ? d.date : v; }, days[0].date);
+    var delta = daysBetween(first, firstDate);
+    return days.map(function (d) { return { id: d.id, date: addDays(d.date, delta), name: d.name, note: d.note }; });
+  }
+  function parseQuantity(value) {
+    var text = String(value).trim();
+    if (!text) { return 0; }
+    // Einheit am Zellende (z. B. 40kg) ist nur eine Beschriftung, keine Umrechnung.
+    text = text.replace(/\s*(kg|g|Stück|Bund|Kisten?|Packung(?:en)?|Pck|Eimer)\s*$/i, '').trim();
+    var parts = text.split('+').map(function (p) { return parseNumber(p.trim()); });
+    if (parts.some(function (n) { return n === null || !Number.isFinite(n) || n < 0; })) { throw new Error('Ungültige Menge: ' + value); }
+    var sum = round6(parts.reduce(function (a, b) { return a + b; }, 0));
+    if (!Number.isFinite(sum)) { throw new Error('Menge zu groß'); }
+    return sum;
+  }
+  function quantityAt(order, articleId, dayId) {
+    var q = order.quantities.find(function (q) { return q.articleId === articleId && q.dayId === dayId; });
+    return q ? q.qty : 0;
+  }
+  function setQuantity(order, articleId, dayId, text) {
+    var qty = parseQuantity(text);
+    var next = order.quantities.filter(function (q) { return q.articleId !== articleId || q.dayId !== dayId; });
+    if (qty) { next.push({ articleId: articleId, dayId: dayId, qty: qty }); }
+    return Object.assign({}, order, { quantities: next });
+  }
+  function todayOrders(articles, order, today) {
+    var groups = [];
+    order.suppliers.forEach(function (s) {
+      var items = [];
+      order.days.slice().sort(function (a, b) { return a.date.localeCompare(b.date); }).forEach(function (d) {
+        if (daysBetween(today, d.date) !== s.lead) { return; }
+        order.assignments.filter(function (a) { return a.supplierId === s.id; }).forEach(function (link) {
+          var a = articles.find(function (a) { return a.id === link.articleId; });
+          var qty = quantityAt(order, link.articleId, d.id);
+          if (a && qty > 0) { items.push({ article: a, qty: qty, pack: link.pack, day: d }); }
+        });
+      });
+      if (items.length) { groups.push({ supplier: s, items: items }); }
+    });
+    return groups;
+  }
+  function renderOrders(groups) {
+    if (!groups.length) { return '<p class="empty">Keine geplanten Bestellungen für diesen Stichtag.</p>'; }
+    return groups.map(function (g) {
+      return '<h3>' + esc(g.supplier.name) + ' · Vorlauf ' + g.supplier.lead + ' Tage</h3><ul class="list">' + g.items.map(function (i) {
+        return '<li><strong>' + esc(i.article.name) + ': ' + esc(fmtNumber(i.qty)) + ' ' + esc(i.article.unit) + '</strong> · Gebinde ' + esc(i.pack) +
+          '<div class="muted">Lieferung ' + esc(formatDate(i.day.date)) + ' · ' + esc(i.day.name) + (i.day.note ? ' · ' + esc(i.day.note) : '') + '</div></li>';
+      }).join('') + '</ul>';
+    }).join('');
+  }
+  function renderMatrix(articles, order, mode, focus) {
+    var days = order.days.slice().sort(function (a, b) { return a.date.localeCompare(b.date); });
+    if (mode === 'day') { days = days.filter(function (d) { return d.id === focus; }); }
+    if (mode === 'article') { articles = articles.filter(function (a) { return a.id === focus; }); }
+    if (!days.length || !articles.length) { return '<p class="empty">Bitte Artikel und Veranstaltungstage anlegen oder einen Bestellplan importieren.</p>'; }
+    return '<table><caption>Geplante Mengen (0 = keine Bestellung)</caption><thead><tr><th scope="col">Artikel / Lieferant / Gebinde</th>' + days.map(function (d) {
+      return '<th scope="col">' + esc(d.name) + '<br>' + esc(formatDate(d.date)) + '<br>' + esc(d.note) + '</th>';
+    }).join('') + '</tr></thead><tbody>' + articles.map(function (a) {
+      var link = order.assignments.find(function (x) { return x.articleId === a.id; });
+      var supplier = order.suppliers.find(function (x) { return x.id === link.supplierId; });
+      return '<tr><th scope="row">' + esc(a.name) + ' (' + esc(a.unit) + ')<div class="muted">' + esc(supplier.name) + ' · ' + esc(link.pack) + '</div></th>' + days.map(function (d) {
+        return '<td><input type="text" inputmode="decimal" data-quantity-article="' + esc(a.id) + '" data-quantity-day="' + esc(d.id) + '" aria-label="' + esc(a.name + ', ' + d.name + ', ' + d.date) + '" value="' + esc(fmtNumber(quantityAt(order, a.id, d.id))) + '"></td>';
+      }).join('') + '</tr>';
+    }).join('') + '</tbody></table>';
+  }
+  var PLAN_META = ['Artikel', 'Gebinde', 'Vorlauf', 'ID', 'Einheit', 'Kategorie', 'Rhythmus', 'N-Tage', 'Mindestbestand'];
+  function orderToCsv(articles, order) {
+    var header = PLAN_META.concat(order.days.map(function (d) { return d.date + ' | ' + d.name; }));
+    function metaRow(name, values) { return [name, '', '', '', '', '', '', '', ''].concat(values); }
+    var rows = [metaRow('Wetter', order.days.map(function (d) { return d.note; })), metaRow('Tag-ID', order.days.map(function (d) { return d.id; }))];
+    order.suppliers.forEach(function (s) {
+      rows.push(['Lieferant: ' + s.name, '', s.lead, s.id, '', '', '', '', ''].concat(order.days.map(function () { return ''; })));
+      order.assignments.filter(function (x) { return x.supplierId === s.id; }).forEach(function (x) {
+        var a = articles.find(function (a) { return a.id === x.articleId; });
+        rows.push(['Artikel: ' + a.name, x.pack, '', a.id, a.unit, a.category, a.rhythm, a.everyDays, a.minStock].concat(order.days.map(function (d) { return quantityAt(order, a.id, d.id); })));
+      });
+    });
+    return toCsv(header.map(csvEscape), rows);
+  }
+  function csvToOrder(text, existing) {
+    // Import is transactional: a failed row never changes existing state.
+    var articles = JSON.parse(JSON.stringify(existing.articles)), entries = JSON.parse(JSON.stringify(existing.entries));
+    var order = { suppliers: [], days: [], assignments: [], quantities: [] };
+    try {
+      var rows = parseCsv(text);
+      if (!rows.length || rows[0][0] !== 'Artikel') { throw new Error('Kopfzeile muss mit Artikel beginnen'); }
+      var header = rows.shift(), metaCount = 1;
+      while (metaCount < header.length && PLAN_META.indexOf(header[metaCount]) >= 0) { metaCount++; }
+      function value(row, name) { var i = header.indexOf(name); return i >= 0 && i < metaCount ? (row[i] || '') : ''; }
+      var dayIds = rows.find(function (r) { return r[0] === 'Tag-ID'; });
+      var dates = rows.find(function (r) { return r[0] === 'Datum'; });
+      header.slice(metaCount).forEach(function (h, i) {
+        var parts = /^(\d{4}-\d{2}-\d{2})\s*\|\s*([\s\S]+)$/.exec(h);
+        order.days.push({ id: dayIds ? (dayIds[metaCount + i] || '') : 'd' + (i + 1),
+          date: parts ? parts[1] : (dates ? dates[metaCount + i] : ''), name: parts ? parts[2] : h, note: '' });
+      });
+      var weather = rows.find(function (r) { return r[0] === 'Wetter'; });
+      if (weather) { order.days.forEach(function (d, i) { d.note = weather[metaCount + i] || ''; }); }
+      var currentSupplier = null, usedArticles = new Set();
+      rows.forEach(function (r, rowIndex) {
+        if (r.length !== header.length) { throw new Error('Zeile ' + (rowIndex + 2) + ': falsche Spaltenzahl'); }
+        if (['Wetter', 'Tag-ID', 'Datum'].indexOf(r[0]) >= 0 || r.every(function (v) { return !v.trim(); })) { return; }
+        if (r[0].startsWith('Lieferant: ')) {
+          var lead = value(r, 'Vorlauf');
+          currentSupplier = { id: value(r, 'ID') || newId(order.suppliers, 's'), name: r[0].slice(11).trim(), lead: lead === '' ? 1 : parseNumber(lead) };
+          order.suppliers.push(currentSupplier); return;
+        }
+        if (!currentSupplier) { throw new Error('Artikel ohne Lieferantengruppe'); }
+        var articleName = r[0].startsWith('Artikel: ') ? r[0].slice(9) : r[0];
+        var id = value(r, 'ID');
+        var prior = articles.find(function (a) { return id ? a.id === id : a.name === articleName; });
+        var a = makeArticle({ id: id || (prior ? prior.id : newId(articles, 'a')), name: articleName, unit: value(r, 'Einheit') || (prior ? prior.unit : 'Einheiten'),
+          category: value(r, 'Kategorie') || (prior ? prior.category : 'frisch'), rhythm: value(r, 'Rhythmus') || (prior ? prior.rhythm : 'asneeded'),
+          everyDays: value(r, 'N-Tage') || (prior ? prior.everyDays : null), minStock: header.indexOf('Mindestbestand') >= 0 ? value(r, 'Mindestbestand') : (prior ? prior.minStock : null) });
+        if (validateArticle(a).length || usedArticles.has(a.id)) { throw new Error('Artikel ungültig oder doppelt: ' + a.name); }
+        usedArticles.add(a.id);
+        if (prior) { articles = articles.map(function (x) { return x.id === a.id ? a : x; }); } else { articles.push(a); }
+        order.assignments.push({ articleId: a.id, supplierId: currentSupplier.id, pack: value(r, 'Gebinde') || a.unit });
+        order.days.forEach(function (d, i) {
+          var qty = parseQuantity(r[metaCount + i]);
+          if (qty) { order.quantities.push({ articleId: a.id, dayId: d.id, qty: qty }); }
+        });
+      });
+      var errors = validateOrder(order, articles);
+      if (errors.length) { throw new Error(errors.join('; ')); }
+      // Unmentioned v1 articles remain available, assigned to a neutral group.
+      var missing = articles.filter(function (a) { return !usedArticles.has(a.id); });
+      if (missing.length) {
+        var neutral = { id: newId(order.suppliers, 's'), name: 'Nicht zugeordnet', lead: 1 };
+        order.suppliers.push(neutral);
+        missing.forEach(function (a) { order.assignments.push({ articleId: a.id, supplierId: neutral.id, pack: a.unit }); });
+      }
+      return { articles: articles, entries: entries, order: order, errors: [] };
+    } catch (err) { return { errors: [err.message] }; }
+  }
+
   return {
+    blankOrder: blankOrder, syncOrder: syncOrder, validateOrder: validateOrder, addDays: addDays, shiftDays: shiftDays,
+    parseQuantity: parseQuantity, quantityAt: quantityAt, setQuantity: setQuantity, todayOrders: todayOrders,
+    renderOrders: renderOrders, renderMatrix: renderMatrix, orderToCsv: orderToCsv, csvToOrder: csvToOrder,
     CATEGORIES: CATEGORIES, RHYTHMS: RHYTHMS, ENTRY_TYPES: ENTRY_TYPES,
     ARTICLE_COLUMNS: ARTICLE_COLUMNS, ENTRY_COLUMNS: ENTRY_COLUMNS,
     isValidDate: isValidDate, daysBetween: daysBetween, todayString: todayString, formatDate: formatDate,
@@ -620,7 +865,7 @@ var StockLogic = (function () {
   'use strict';
   var L = StockLogic;
   var STORAGE_KEY = 'schlossweihnacht-vorrat-v1';
-  var state = { articles: [], entries: [] };
+  var state = { articles: [], entries: [], order: L.blankOrder([]) };
   var currentTab = 'due';
 
   function $(id) { return document.getElementById(id); }
@@ -634,9 +879,16 @@ var StockLogic = (function () {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) { return; }
-      var data = L.sanitizeData(JSON.parse(raw));
+      var parsed = JSON.parse(raw);
+      var data = L.sanitizeData(parsed);
       state.articles = data.articles;
       state.entries = data.entries;
+      if (parsed.order && !L.validateOrder(parsed.order, state.articles).length) {
+        state.order = L.syncOrder(parsed.order, state.articles);
+      } else {
+        state.order = L.blankOrder(state.articles);
+        if (parsed.order) { data.dropped++; }
+      }
       if (data.dropped) { showMsg(data.dropped + ' ungültige gespeicherte Datensätze wurden verworfen.', 'err'); }
     } catch (err) {
       showMsg('Gespeicherte Daten konnten nicht gelesen werden: ' + err.message, 'err');
@@ -646,10 +898,10 @@ var StockLogic = (function () {
      bleibt die Meldung in #saveError stehen, bis ein späteres Speichern gelingt. */
   function save() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, articles: state.articles, entries: state.entries }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, articles: state.articles, entries: state.entries, order: state.order }));
     } catch (err) {
       $('saveError').textContent = 'Nicht gespeichert: Der Browser kann nicht speichern (' + err.message +
-        '). Die Änderung gilt nur bis zum Schließen oder Neuladen der Seite. Bitte jetzt unter „Daten“ Artikelstamm und Einkäufe als CSV exportieren und so sichern.';
+        '). Die Änderung gilt nur bis zum Schließen oder Neuladen der Seite. Bitte jetzt unter „Daten“ Bestellplan, Artikelstamm und Einkäufe als CSV exportieren und so sichern.';
       $('saveError').hidden = false;
       return false;
     }
@@ -659,6 +911,7 @@ var StockLogic = (function () {
   }
   /* speichert, zeichnet neu und meldet den Erfolg nur, wenn wirklich gespeichert wurde */
   function persist(okText) {
+    state.order = L.syncOrder(state.order, state.articles);
     var ok = save();
     render();
     if (ok) { showMsg(okText, 'ok'); } else { showMsg('Nicht gespeichert – siehe Hinweis oben.', 'err'); }
@@ -694,7 +947,9 @@ var StockLogic = (function () {
 
   function render() {
     var today = currentDay();
-    var due = L.dueList(state.articles, state.entries, today);
+    var due = L.dueList(state.order.days.length ? state.articles.filter(function (a) { return a.category === 'verbrauch'; }) : state.articles, state.entries, today);
+    $('orderDue').innerHTML = L.renderOrders(L.todayOrders(state.articles, state.order, today));
+    renderOrder();
     $('dueHint').textContent = 'Stichtag ' + L.formatDate(today) + ' – ' + due.length + ' Artikel fällig.';
     $('dueList').innerHTML = L.renderDue(due);
     $('stockList').innerHTML = L.renderStock(L.stockRows(state.articles, state.entries, today));
@@ -714,6 +969,8 @@ var StockLogic = (function () {
     $('articleRhythm').value = L.RHYTHMS[0].id;
     $('articleEvery').value = '';
     $('articleMin').value = '';
+    $('articlePack').value = '';
+    $('articleSupplier').value = state.order.suppliers[0].id;
     $('articleCancel').hidden = true;
     updateArticleForm();
   }
@@ -763,6 +1020,11 @@ var StockLogic = (function () {
     });
     var errors = L.validateArticle(article);
     if (errors.length) { showMsg(errors.join('; '), 'err'); return; }
+    var supplierId = $('articleSupplier').value || state.order.suppliers[0].id;
+    var pack = $('articlePack').value.trim() || article.unit;
+    if (!state.order.suppliers.some(function (s) { return s.id === supplierId; })) { showMsg('Lieferant unbekannt', 'err'); return; }
+    state.order.assignments = state.order.assignments.filter(function (x) { return x.articleId !== article.id; });
+    state.order.assignments.push({ articleId: article.id, supplierId: supplierId, pack: pack });
     if (id) {
       state.articles = state.articles.map(function (a) { return a.id === id ? article : a; });
     } else {
@@ -775,6 +1037,9 @@ var StockLogic = (function () {
   function editArticle(id) {
     var a = state.articles.filter(function (x) { return x.id === id; })[0];
     if (!a) { return; }
+    var assignment = state.order.assignments.find(function (x) { return x.articleId === a.id; });
+    $('articleSupplier').value = assignment.supplierId;
+    $('articlePack').value = assignment.pack;
     $('articleId').value = a.id;
     $('articleName').value = a.name;
     $('articleUnit').value = a.unit;
@@ -791,7 +1056,24 @@ var StockLogic = (function () {
     if (!el) { return; }
     var act = el.getAttribute('data-act');
     var id = el.getAttribute('data-id');
-    if (act === 'tab') {
+    if (act === 'export-plan') {
+      download('bestellplan-' + currentDay() + '.csv', L.orderToCsv(state.articles, state.order));
+    } else if (act === 'edit-supplier') {
+      var supplier = state.order.suppliers.find(function (s) { return s.id === id; });
+      $('supplierId').value = supplier.id; $('supplierName').value = supplier.name; $('supplierLead').value = String(supplier.lead);
+    } else if (act === 'reset-supplier') {
+      $('supplierId').value = ''; $('supplierName').value = ''; $('supplierLead').value = '1';
+    } else if (act === 'edit-day') {
+      var day = state.order.days.find(function (d) { return d.id === id; });
+      $('dayId').value = day.id; $('dayName').value = day.name; $('dayDate').value = day.date; $('dayNote').value = day.note;
+    } else if (act === 'reset-day') {
+      $('dayId').value = ''; $('dayName').value = ''; $('dayDate').value = ''; $('dayNote').value = '';
+    } else if (act === 'delete-day') {
+      if (!confirm('Tag und zugehörige Bestellmengen löschen?')) { return; }
+      state.order.days = state.order.days.filter(function (d) { return d.id !== id; });
+      state.order.quantities = state.order.quantities.filter(function (q) { return q.dayId !== id; });
+      persist('Tag gelöscht.');
+    } else if (act === 'tab') {
       showTab(id);
     } else if (act === 'buy') {
       $('entryArticle').value = id;
@@ -823,6 +1105,7 @@ var StockLogic = (function () {
       if (!confirm('Wirklich alle Artikel und Erfassungen löschen?')) { return; }
       state.articles = [];
       state.entries = [];
+      state.order = L.blankOrder([]);
       persist('Alle Daten gelöscht.');
     }
   }
@@ -847,6 +1130,69 @@ var StockLogic = (function () {
     });
   }
 
+
+  function renderOrder() {
+    var o = state.order;
+    var selectedSupplier = $('articleSupplier').value;
+    $('articleSupplier').innerHTML = L.renderOptions(o.suppliers, selectedSupplier);
+    $('supplierList').innerHTML = '<ul class="list">' + o.suppliers.map(function (s) {
+      return '<li>' + L.esc(s.name) + ' · Vorlauf ' + s.lead + ' Tage <button type="button" data-act="edit-supplier" data-id="' + L.esc(s.id) + '">Bearbeiten</button></li>';
+    }).join('') + '</ul>';
+    $('dayList').innerHTML = '<ul class="list">' + o.days.map(function (d) {
+      return '<li>' + L.esc(d.date + ' · ' + d.name + ' · ' + d.note) + ' <button type="button" data-act="edit-day" data-id="' + L.esc(d.id) + '">Bearbeiten</button> <button type="button" data-act="delete-day" data-id="' + L.esc(d.id) + '">Löschen</button></li>';
+    }).join('') + '</ul>';
+    renderPlan();
+  }
+  function renderPlan() {
+    var mode = $('planMode').value || 'day';
+    var options = mode === 'article' ? state.articles : state.order.days.slice().sort(function (a, b) { return a.date.localeCompare(b.date); }).map(function (d) { return { id: d.id, name: d.date + ' · ' + d.name }; });
+    var focus = $('planFocus').value;
+    if (!options.some(function (x) { return x.id === focus; })) { focus = options.length ? options[0].id : ''; }
+    $('planFocus').innerHTML = L.renderOptions(options, focus); $('planFocus').value = focus;
+    $('planFocus').hidden = mode === 'all';
+    $('planMatrix').innerHTML = L.renderMatrix(state.articles, state.order, mode, focus);
+  }
+  function saveOrderCandidate(candidate, message) {
+    var errors = L.validateOrder(candidate, state.articles);
+    if (errors.length) { showMsg(errors.join('; '), 'err'); return false; }
+    state.order = candidate; persist(message); return true;
+  }
+  function onSupplier(ev) {
+    ev.preventDefault();
+    var id = $('supplierId').value || L.newId(state.order.suppliers, 's');
+    var row = { id: id, name: $('supplierName').value.trim(), lead: L.parseNumber($('supplierLead').value) };
+    var next = state.order.suppliers.filter(function (s) { return s.id !== id; }).concat([row]);
+    if (saveOrderCandidate(Object.assign({}, state.order, { suppliers: next }), 'Lieferant gespeichert.')) { $('supplierId').value = id; }
+  }
+  function onDay(ev) {
+    ev.preventDefault();
+    var id = $('dayId').value || L.newId(state.order.days, 'd');
+    var row = { id: id, name: $('dayName').value.trim(), date: $('dayDate').value, note: $('dayNote').value };
+    var next = state.order.days.filter(function (d) { return d.id !== id; }).concat([row]);
+    if (saveOrderCandidate(Object.assign({}, state.order, { days: next }), 'Tag gespeichert.')) { $('dayId').value = id; }
+  }
+  function onShift(ev) {
+    ev.preventDefault();
+    try { saveOrderCandidate(Object.assign({}, state.order, { days: L.shiftDays(state.order.days, $('shiftStart').value) }), 'Termine verschoben.'); }
+    catch (err) { showMsg(err.message, 'err'); }
+  }
+  function onQuantity(ev) {
+    var el = ev.target;
+    var articleId = el && el.getAttribute ? el.getAttribute('data-quantity-article') : null;
+    if (!articleId) { return; }
+    try { saveOrderCandidate(L.setQuantity(state.order, articleId, el.getAttribute('data-quantity-day'), el.value), 'Bestellmenge gespeichert.'); }
+    catch (err) { showMsg(err.message, 'err'); }
+  }
+  function onImportPlan() {
+    readFile($('importPlan'), function (text) {
+      var result = L.csvToOrder(text, state);
+      if (result.errors.length) { showMsg('Import abgebrochen: ' + result.errors.join('; '), 'err'); return; }
+      if (!confirm('Bestellplan ersetzen? Vorhandene Artikel werden ergänzt / aktualisiert; Erfassungen bleiben erhalten.')) { return; }
+      state = { articles: result.articles, entries: result.entries, order: result.order };
+      persist('Bestellplan importiert.');
+    });
+  }
+
   function init() {
     $('entryType').innerHTML = L.renderOptions(L.ENTRY_TYPES, 'purchase');
     $('articleCategory').innerHTML = L.renderOptions(L.CATEGORIES, L.CATEGORIES[0].id);
@@ -855,6 +1201,13 @@ var StockLogic = (function () {
     $('entryDate').value = $('today').value;
     load();
     document.addEventListener('click', onClick);
+    document.addEventListener('change', onQuantity);
+    $('supplierForm').addEventListener('submit', onSupplier);
+    $('dayForm').addEventListener('submit', onDay);
+    $('shiftForm').addEventListener('submit', onShift);
+    $('planMode').addEventListener('change', function () { $('planFocus').value = ''; renderPlan(); });
+    $('planFocus').addEventListener('change', renderPlan);
+    $('importPlan').addEventListener('change', onImportPlan);
     $('today').addEventListener('change', function () { $('entryDate').value = currentDay(); render(); });
     $('entryType').addEventListener('change', updateEntryForm);
     $('articleRhythm').addEventListener('change', updateArticleForm);

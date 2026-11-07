@@ -57,7 +57,7 @@ function startPage(stored, opts) {
     const btn = { getAttribute: (n) => (n === 'data-act' ? act : n === 'data-id' ? id : null) };
     doc.listeners.click({ target: { closest: () => btn } });
   }
-  return { els, store, control, downloads, click, el: (id) => doc.getElementById(id) };
+  return { els, store, control, downloads, click, change: ev => doc.listeners.change(ev), el: (id) => doc.getElementById(id) };
 }
 
 const KEY = 'schlossweihnacht-vorrat-v1';
@@ -255,4 +255,110 @@ test('Speicherfehler auf allen schreibenden Bedienpfaden meldet nie Erfolg', asy
 
   // der persistente Stand blieb in allen Fällen unverändert
   assert.deepEqual(JSON.parse(seed.store.get(KEY)), stored);
+});
+
+// OPS-T-0303: die neuen Bedienpfade laufen gegen dieselben Skripte wie die Webseite.
+const planFixture = require('node:fs').readFileSync(require('node:path').join(__dirname, 'fixtures', 'bestellplan.csv'), 'utf8');
+function quantity(p, article, day, value) {
+  const target = { value, getAttribute: n => n === 'data-quantity-article' ? article : n === 'data-quantity-day' ? day : null };
+  p.el('planMatrix');
+  // delegierter change-Handler am Dokument
+  p.change({ target });
+}
+
+test('AC02: Lieferant, Artikel mit Gebinde, Tag mit Notiz, Menge, Handyansichten und erneutes Laden', () => {
+  const p = startPage();
+  p.el('supplierName').value = 'Bäcker'; p.el('supplierLead').value = '0';
+  submit(p, 'supplierForm');
+  const supplierId = p.el('supplierId').value;
+  assert.ok(supplierId);
+  p.el('supplierName').value = 'Bäcker Süd'; submit(p, 'supplierForm');
+  assert.equal(JSON.parse(p.store.get(KEY)).order.suppliers.length, 2);
+  p.el('articleName').value = 'Brot'; p.el('articleUnit').value = 'kg';
+  p.el('articleCategory').value = 'frisch'; p.el('articleRhythm').value = 'asneeded';
+  p.el('articleSupplier').value = supplierId; p.el('articlePack').value = '10-kg-Kiste';
+  submit(p, 'articleForm');
+  p.el('dayName').value = 'Tag 1'; p.el('dayDate').value = '2026-12-04'; p.el('dayNote').value = 'Regen';
+  submit(p, 'dayForm');
+  const dayId = p.el('dayId').value;
+  p.el('dayNote').value = 'Sonne'; submit(p, 'dayForm');
+  assert.equal(JSON.parse(p.store.get(KEY)).order.days.length, 1);
+  quantity(p, 'a1', dayId, '100+100');
+  p.el('today').value = '2026-12-04'; p.el('today').listeners.change();
+  assert.match(p.el('orderDue').innerHTML, /Bäcker Süd/);
+  assert.match(p.el('orderDue').innerHTML, /200 kg/);
+  assert.match(p.el('orderDue').innerHTML, /10-kg-Kiste/);
+  assert.match(p.el('orderDue').innerHTML, /Sonne/);
+  const before = p.store.get(KEY);
+  quantity(p, 'a1', dayId, 'oops');
+  assert.equal(p.store.get(KEY), before);
+  assert.equal(p.el('msg').className, 'err');
+  p.el('planMode').value = 'article'; p.el('planMode').listeners.change();
+  assert.match(p.el('planMatrix').innerHTML, /200/);
+  p.el('planMode').value = 'all'; p.el('planMode').listeners.change();
+  assert.equal(p.el('planFocus').hidden, true);
+  p.el('shiftStart').value = '2027-12-04'; submit(p, 'shiftForm');
+  assert.equal(JSON.parse(p.store.get(KEY)).order.days[0].date, '2027-12-04');
+  assert.equal(JSON.parse(p.store.get(KEY)).order.quantities[0].qty, 200);
+  const q = startPage(null, { store: p.store });
+  assert.match(q.el('planMatrix').innerHTML, /200/);
+  q.click('edit-article', 'a1');
+  assert.equal(q.el('articlePack').value, '10-kg-Kiste');
+  assert.equal(q.el('articleSupplier').value, supplierId);
+});
+
+test('AC01/AC03: Import, Heute bestellen plus Verbrauchsartikel, Export/Re-Import; v1 bleibt erhalten', async () => {
+  const p = startPage(); p.click('sample');
+  p.el('importPlan').files = [{ text: planFixture }]; p.el('importPlan').listeners.change();
+  await new Promise(r => setTimeout(r, 5));
+  assert.match(p.el('msg').textContent, /Bestellplan importiert/);
+  p.el('today').value = '2026-12-03'; p.el('today').listeners.change();
+  assert.match(p.el('orderDue').innerHTML, /Lachs 10kg: 50/);
+  assert.doesNotMatch(p.el('dueList').innerHTML, /Brötchen/);
+  assert.match(p.el('articleList').innerHTML, /Küchenrolle/);
+  p.click('edit-article', 'a13'); // Handschuhe nach Bedarf auf täglich setzen
+  p.el('articleRhythm').value = 'daily'; submit(p, 'articleForm');
+  assert.match(p.el('dueList').innerHTML, /Handschuhe/);
+  p.click('export-plan');
+  const csv = p.downloads.blobs[0];
+  const q = startPage();
+  q.el('importPlan').files = [{ text: csv }]; q.el('importPlan').listeners.change();
+  await new Promise(r => setTimeout(r, 5));
+  const a = JSON.parse(p.store.get(KEY)), b = JSON.parse(q.store.get(KEY));
+  const normalize = state => {
+    state.articles.sort((a, b) => a.id.localeCompare(b.id));
+    state.order.assignments.sort((a, b) => a.articleId.localeCompare(b.articleId));
+    state.order.quantities.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    return state;
+  };
+  assert.deepEqual(normalize(b), normalize(a));
+  const before = q.store.get(KEY);
+  q.el('importPlan').files = [{ text: planFixture.replace('100+100', 'kaputt') }]; q.el('importPlan').listeners.change();
+  await new Promise(r => setTimeout(r, 5));
+  assert.equal(q.store.get(KEY), before);
+  assert.match(q.el('msg').textContent, /Import abgebrochen/);
+});
+
+test('AC03: v1 localStorage migriert ohne Änderung von Bestand und Kosten', () => {
+  const a = { id: 'a1', name: 'Servietten', unit: 'Packung', category: 'verbrauch', rhythm: 'daily', everyDays: null, minStock: 2 };
+  const e = { id: 'e1', articleId: 'a1', type: 'purchase', qty: 3, date: '2026-01-01', shop: 'Metro', price: 12.5 };
+  const p = startPage({ version: 1, articles: [a], entries: [e] });
+  assert.match(p.el('stockList').innerHTML, /3 Packung/);
+  assert.match(p.el('summary').innerHTML, /12,50 €/);
+  p.click('edit-article', 'a1'); submit(p, 'articleForm');
+  const data = JSON.parse(p.store.get(KEY));
+  assert.equal(data.version, 2); assert.deepEqual(data.articles, [a]); assert.deepEqual(data.entries, [e]);
+  assert.equal(data.order.assignments[0].pack, 'Packung');
+});
+
+test('Neue Bestellplan-Pfade melden Speicherfehler dauerhaft und nie als Erfolg', async () => {
+  const p = startPage(null, { failSet: true });
+  p.el('supplierName').value = 'Metro'; p.el('supplierLead').value = '1'; submit(p, 'supplierForm'); assertSaveFailureShown(p);
+  p.el('dayDate').value = '2026-12-04'; p.el('dayName').value = 'Tag 1'; submit(p, 'dayForm'); assertSaveFailureShown(p);
+  p.el('importPlan').files = [{ text: planFixture }]; p.el('importPlan').listeners.change();
+  await new Promise(r => setTimeout(r, 5)); assertSaveFailureShown(p);
+  const data = JSON.parse(p.store.get(KEY) || 'null'); assert.equal(data, null);
+  p.el('shiftStart').value = '2027-12-01'; submit(p, 'shiftForm'); assertSaveFailureShown(p);
+  quantity(p, 'a1', 'd1', '2'); assertSaveFailureShown(p);
+  p.click('delete-day', 'd1'); assertSaveFailureShown(p);
 });

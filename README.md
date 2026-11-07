@@ -101,3 +101,100 @@ brauchen einen kurzen Blick im Browser.
 
 Gemeinsame Liste für mehrere Geräte, Server, Login, Bestellung bei Lieferanten,
 Rezepte und Mengenplanung aus Gästezahlen.
+
+## Bestellplan nach Lieferant und Veranstaltungstag (Version 2)
+
+Unter **Lieferanten & Tage** Lieferanten mit Bestellvorlauf (0 bis 365
+Kalendertage, Vorgabe 1) und Veranstaltungstage mit Datum, Bezeichnung und
+optionaler Wetter-/Tagesnotiz anlegen. „Bearbeiten“ lädt den jeweiligen Datensatz
+ins Formular; „Neu / Abbrechen“ leert es für einen weiteren Datensatz.
+Die Bezeichnungen dürfen sich wiederholen (etwa zwei Pausentage).
+Ein Datum kann einzeln geändert werden; „Termine verschieben“ verschiebt alle
+Tage relativ zum frühesten Tag. Mengen und Tagesnotizen bleiben dabei erhalten,
+auch über Monats-, Jahreswechsel und Schalttage.
+
+Jeder Artikel hat unter **Artikel** einen Lieferanten und ein freies Gebinde
+(z. B. „Kiste 3 kg“, „10x1kg“). Bestehende Artikel erhalten zunächst den
+Lieferanten „Nicht zugeordnet“ mit Vorlauf 1 und ihre Einheit als Gebinde.
+Den Lieferanten anschließend passend zuordnen. Die geplante Menge bezieht sich
+auf die **Einheit des Artikels**; die Gebindeangabe dient als Bestellhilfe und
+rechnet Mengen nicht automatisch um.
+
+Unter **Bestellplan** Mengen für Artikel × Veranstaltungstag eingeben. Für das
+Handy gibt es „Ein Tag“ oder „Ein Artikel“, für den Rechner „Ganze Tabelle“
+(horizontal scrollbar). Nach Verlassen einer Mengenzelle wird gespeichert.
+Leere Zellen bedeuten 0, `100+100` ergibt 200; Kommazahlen sind möglich.
+Ungültige Mengen werden gemeldet und nicht gespeichert.
+
+**Heute bestellen** berechnet zum Stichtag für jeden Lieferanten:
+`Bestelldatum = Liefertag − Bestellvorlauf`. Es erscheinen Artikel, Menge,
+Einheit, Gebinde und Liefertag samt Notiz. Pausentage und Vorbereitungstage
+werden genauso behandelt wie Veranstaltungstage. Sobald Tage angelegt sind,
+zeigt die zusätzliche Rhythmus-/Mindestbestandsliste nur **Verbrauchsartikel**.
+Ohne Veranstaltungstage arbeitet sie weiterhin wie Version 1 für alle Artikel.
+Es gibt keine automatische Bestellung und keine Erledigt-Markierung für den
+Bestellplan; die Matrix stellt geplante Mengen dar. Erfasste Einkäufe verändern
+sie nicht.
+
+### Tabellenimport und verlustfreier Export
+
+Unter **Daten** den Bestellplan als UTF-8-CSV mit Semikolon importieren bzw.
+exportieren. Die Beispieldatei [tests/fixtures/bestellplan.csv](tests/fixtures/bestellplan.csv)
+folgt der bereitgestellten Tabellenstruktur (Lieferantengruppen, 15 Spalten von
+„Mehr Vorlauf“ über Pausen bis „Abbau“, Wetter, Einheitenzellen und Summen).
+Die konkreten ISO-Daten sind für den Test ergänzt; Bäcker hat zur Gegenprobe
+Vorlauf 0, alle übrigen Lieferanten 1. Die Quelle enthält außerdem einen zweiten
+Vorjahresblock; die Fixture bildet den ersten vollständigen Mengenblock ab.
+
+Kompakte Importstruktur:
+
+```csv
+Artikel;Gebinde;Vorlauf;Aufbau;1. Tag
+Datum;;;2026-12-02;2026-12-04
+Wetter;;;;Regen
+Lieferant: Metro;;1;;
+Lachs 10kg;10 kg;;40kg;100+100
+Lieferant: Bäcker;;0;;
+Knaxx Brötchen;Stück;;;170
+```
+
+„Datum“ liefert ISO-Daten (`JJJJ-MM-TT`) zu den Spaltenbezeichnungen. Alternativ
+kann jede Tagesüberschrift `JJJJ-MM-TT | Bezeichnung` heißen. „Wetter“ wird als
+Notiz übernommen. Vorlauf ist je Lieferantenzeile optional (Standard 1).
+Eine Zahl mit angehängter Einheit wie `40kg` wird als 40 gelesen, ohne
+Umrechnung. Unterstützte Zell-Einheiten: kg, g, Stück, Bund, Kiste(n), Packung(en),
+Pck, Eimer. Die Einheit des Artikels entsprechend einstellen; ein kompakter
+Import ohne Einheitsspalte verwendet bei neuen Artikeln zunächst „Einheiten“.
+
+Der Export enthält zusätzlich IDs, Einheit, Kategorie, Rhythmus, N-Tage und
+Mindestbestand sowie eine `Tag-ID`-Zeile. Artikelzeilen beginnen beim Export
+mit `Artikel: `; das schützt auch Artikelnamen wie „Wetter“ vor Verwechslung.
+Diese Metadaten erhalten Lieferantenzuordnung, Gebinde, Tage, Notizen,
+Verbrauchsartikel-Einstellungen und alle Mengen beim Re-Import. Die Reihenfolge
+der Artikel kann sich beim Gruppieren nach Lieferant ändern; ihre Identität und
+Werte bleiben gleich. Auch leere Lieferantengruppen bleiben erhalten.
+
+Ein Import ersetzt Lieferanten, Tage und Bestellmengen **nach Rückfrage**.
+Artikel werden über vorhandene IDs, bei kompakten Tabellen über gleiche Namen
+zugeordnet. Nicht erwähnte Artikel und alle Erfassungen bleiben erhalten;
+Artikel ohne passende importierte Zuordnung landen unter „Nicht zugeordnet“.
+Ein fehlerhafter Datensatz lehnt die ganze Datei ab. Vor einem Import immer
+exportieren: **Bestellplan und Einkäufe**, zusätzlich den Artikelstamm als
+Version-1-kompatible Sicherung. Die alte Artikelstamm-CSV enthält keine
+Bestellplan-Zuordnungen; diese stehen in der Bestellplan-CSV.
+
+### Daten aus Version 1 und Testgrenzen
+
+Der bisherige Speicherschlüssel bleibt unverändert. Artikel und Erfassungen aus
+Version 1 werden beim Laden übernommen; neue Lieferanten-/Planfelder werden
+ergänzt. Gespeichert wird danach Version 2. Bestand und Kosten rechnen mit den
+bisherigen IDs und Daten weiter. Eine beschädigte gespeicherte Planstruktur
+wird mit Meldung verworfen; gültige Vorratsdaten bleiben erhalten.
+
+Die bestehenden Node-Befehle / `npm test` prüfen jetzt zusätzlich die
+Stichtagsbestellung für Vorlauf 0 und 1 gegen die Fixture, CSV-Rundlauf mit
+Sonderzeichen, Datumsverschiebung, v1-Migration und Bestandserhalt, neue
+Formulare und Handyansichten sowie Import-/Speicherfehler. Alle Tests nutzen
+die Skripte aus `index.html`, ohne Netz oder Pakete. Die UI-Tests sind weiterhin
+Browserattrappen; visuelles Layout und Bedienbarkeit auf einem echten Handy
+sind damit nicht belegt.
