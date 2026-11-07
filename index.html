@@ -41,6 +41,7 @@
   .actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .6rem; }
   #msg { min-height: 1.5rem; margin: .25rem 0 .5rem; font-weight: 600; }
   #msg.ok { color: var(--accent); } #msg.err { color: var(--err); }
+  #saveError { margin: .25rem 0 .5rem; padding: .5rem .7rem; border: 2px solid var(--err); border-radius: 8px; color: var(--err); font-weight: 600; background: var(--card); }
   .total { font-size: 1.25rem; font-weight: 700; margin-bottom: .5rem; }
 </style>
 </head>
@@ -59,6 +60,7 @@
     <button type="button" data-act="tab" data-id="articles">Artikel</button>
     <button type="button" data-act="tab" data-id="data">Daten</button>
   </nav>
+  <div id="saveError" role="alert" hidden></div>
   <div id="msg" role="status" aria-live="polite"></div>
 </header>
 <main>
@@ -640,12 +642,27 @@ var StockLogic = (function () {
       showMsg('Gespeicherte Daten konnten nicht gelesen werden: ' + err.message, 'err');
     }
   }
+  /* Gibt true zurück, wenn der Browser gespeichert hat, sonst false. Bei einem Fehler
+     bleibt die Meldung in #saveError stehen, bis ein späteres Speichern gelingt. */
   function save() {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, articles: state.articles, entries: state.entries }));
     } catch (err) {
-      showMsg('Speichern im Browser nicht möglich – bitte CSV exportieren: ' + err.message, 'err');
+      $('saveError').textContent = 'Nicht gespeichert: Der Browser kann nicht speichern (' + err.message +
+        '). Die Änderung gilt nur bis zum Schließen oder Neuladen der Seite. Bitte jetzt unter „Daten“ Artikelstamm und Einkäufe als CSV exportieren und so sichern.';
+      $('saveError').hidden = false;
+      return false;
     }
+    $('saveError').textContent = '';
+    $('saveError').hidden = true;
+    return true;
+  }
+  /* speichert, zeichnet neu und meldet den Erfolg nur, wenn wirklich gespeichert wurde */
+  function persist(okText) {
+    var ok = save();
+    render();
+    if (ok) { showMsg(okText, 'ok'); } else { showMsg('Nicht gespeichert – siehe Hinweis oben.', 'err'); }
+    return ok;
   }
 
   function currentDay() {
@@ -731,11 +748,9 @@ var StockLogic = (function () {
     var errors = L.validateEntry(entry, state.articles);
     if (errors.length) { showMsg(errors.join('; '), 'err'); return; }
     state.entries.push(entry);
-    save();
     $('entryQty').value = '';
     $('entryPrice').value = '';
-    render();
-    showMsg('Gespeichert.', 'ok');
+    persist('Gespeichert.');
   }
 
   function onSubmitArticle(ev) {
@@ -753,10 +768,8 @@ var StockLogic = (function () {
     } else {
       state.articles.push(article);
     }
-    save();
     resetArticleForm();
-    render();
-    showMsg('Artikel gespeichert.', 'ok');
+    persist('Artikel gespeichert.');
   }
 
   function editArticle(id) {
@@ -794,18 +807,14 @@ var StockLogic = (function () {
       if (!confirm('Artikel und alle zugehörigen Erfassungen löschen?')) { return; }
       state.articles = state.articles.filter(function (a) { return a.id !== id; });
       state.entries = state.entries.filter(function (e) { return e.articleId !== id; });
-      save();
-      render();
+      persist('Artikel gelöscht.');
     } else if (act === 'del-entry') {
       state.entries = state.entries.filter(function (e) { return e.id !== id; });
-      save();
-      render();
+      persist('Erfassung gelöscht.');
     } else if (act === 'sample') {
       var merged = L.mergeSample(state.articles);
       state.articles = merged.articles;
-      save();
-      render();
-      showMsg(merged.added + ' Beispielartikel ergänzt.', 'ok');
+      persist(merged.added + ' Beispielartikel ergänzt.');
     } else if (act === 'export-articles') {
       download('artikelstamm-' + currentDay() + '.csv', L.articlesToCsv(state.articles));
     } else if (act === 'export-entries') {
@@ -814,9 +823,7 @@ var StockLogic = (function () {
       if (!confirm('Wirklich alle Artikel und Erfassungen löschen?')) { return; }
       state.articles = [];
       state.entries = [];
-      save();
-      render();
-      showMsg('Alle Daten gelöscht.', 'ok');
+      persist('Alle Daten gelöscht.');
     }
   }
 
@@ -827,9 +834,7 @@ var StockLogic = (function () {
       if (!confirm(res.articles.length + ' Artikel importieren und den Artikelstamm ersetzen?')) { return; }
       state.articles = res.articles;
       state.entries = state.entries.filter(function (e) { return res.articles.some(function (a) { return a.id === e.articleId; }); });
-      save();
-      render();
-      showMsg(res.articles.length + ' Artikel importiert.', 'ok');
+      persist(res.articles.length + ' Artikel importiert.');
     });
   }
   function onImportEntries() {
@@ -838,9 +843,7 @@ var StockLogic = (function () {
       if (res.errors.length) { showMsg('Import abgebrochen: ' + res.errors.slice(0, 3).join('; '), 'err'); return; }
       if (!confirm(res.entries.length + ' Erfassungen importieren und alle bisherigen ersetzen?')) { return; }
       state.entries = res.entries;
-      save();
-      render();
-      showMsg(res.entries.length + ' Erfassungen importiert.', 'ok');
+      persist(res.entries.length + ' Erfassungen importiert.');
     });
   }
 

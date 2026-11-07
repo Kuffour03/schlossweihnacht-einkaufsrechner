@@ -21,9 +21,12 @@ function makeEl(id) {
   };
 }
 
-function startPage(stored) {
+// opts.store: vorhandener Speicher (erneutes Laden); opts.failSet: setItem wirft, solange true
+function startPage(stored, opts) {
+  opts = opts || {};
   const els = new Map();
-  const store = new Map();
+  const store = opts.store || new Map();
+  const control = { failSet: !!opts.failSet };
   if (stored) { store.set('schlossweihnacht-vorrat-v1', JSON.stringify(stored)); }
   const downloads = [];
   const doc = {
@@ -40,7 +43,10 @@ function startPage(stored) {
   };
   const storage = {
     getItem: (k) => (store.has(k) ? store.get(k) : null),
-    setItem: (k, v) => { store.set(k, v); }
+    setItem: (k, v) => {
+      if (control.failSet) { throw new Error('QuotaExceededError'); }
+      store.set(k, v);
+    }
   };
   class FakeBlob { constructor(parts) { this.text = parts.join(''); } }
   const urls = { createObjectURL: (b) => { downloads.blobs = (downloads.blobs || []).concat(b.text); return 'blob:test'; }, revokeObjectURL() {} };
@@ -51,7 +57,18 @@ function startPage(stored) {
     const btn = { getAttribute: (n) => (n === 'data-act' ? act : n === 'data-id' ? id : null) };
     doc.listeners.click({ target: { closest: () => btn } });
   }
-  return { els, store, downloads, click, el: (id) => doc.getElementById(id) };
+  return { els, store, control, downloads, click, el: (id) => doc.getElementById(id) };
+}
+
+const KEY = 'schlossweihnacht-vorrat-v1';
+const submit = (p, form) => p.el(form).listeners.submit({ preventDefault() {} });
+// Fehlermeldung des Speicherns: sichtbar, mit CSV-Hinweis, und keine Erfolgsmeldung
+function assertSaveFailureShown(p) {
+  assert.equal(p.el('saveError').hidden, false);
+  assert.match(p.el('saveError').textContent, /Nicht gespeichert/);
+  assert.match(p.el('saveError').textContent, /CSV/);
+  assert.notEqual(p.el('msg').className, 'ok');
+  assert.doesNotMatch(p.el('msg').textContent, /Gespeichert|gelöscht|importiert|ergänzt/);
 }
 
 test('Start ohne Daten: leere Zustände, Auswahllisten gefüllt', () => {
@@ -143,4 +160,99 @@ test('Beschädigte gespeicherte Daten werden verworfen statt die Seite zu breche
   const p = startPage({ articles: [{ id: 'a1', name: '', unit: 'x', category: 'frisch', rhythm: 'daily' }], entries: 'kaputt' });
   assert.match(p.el('msg').textContent, /verworfen/);
   assert.match(p.el('dueList').innerHTML, /nichts fällig/);
+});
+
+// Regression IR02 (OPS-T-0301): ein werfendes localStorage.setItem darf nie als Erfolg erscheinen
+test('Speicherfehler beim Einkauf: dauerhafte Fehlermeldung, kein „Gespeichert.“, nach Neuladen kein Bestand', () => {
+  const seed = startPage();
+  seed.click('sample');
+  assert.equal(JSON.parse(seed.store.get(KEY)).articles.length, 13);
+
+  const p = startPage(null, { store: seed.store, failSet: true });
+  p.el('today').value = '2026-12-01';
+  p.el('today').listeners.change();
+  p.click('buy', 'a1');
+  p.el('entryQty').value = '20';
+  p.el('entryPrice').value = '12,40';
+  submit(p, 'entryForm');
+  assertSaveFailureShown(p);
+  assert.equal(p.el('msg').className, 'err');
+  // im Speicher steht der Einkauf nicht
+  assert.equal(JSON.parse(p.store.get(KEY)).entries.length, 0);
+
+  // die Meldung bleibt auch nach einer späteren, anderen Meldung stehen
+  p.el('entryQty').value = 'abc';
+  submit(p, 'entryForm');
+  assert.equal(p.el('saveError').hidden, false);
+
+  // erneutes Laden aus dem Speicher: der Einkauf ist nicht vorgetäuscht gespeichert
+  const q = startPage(null, { store: p.store });
+  assert.doesNotMatch(q.el('stockList').innerHTML, /20 Stück/);
+  assert.match(q.el('entryList').innerHTML, /Noch nichts erfasst/);
+  assert.equal(q.el('saveError').textContent, '');
+});
+
+test('Speicherfehler verschwindet erst, wenn ein späteres Speichern gelingt', () => {
+  const p = startPage(null, { failSet: true });
+  p.click('sample');
+  assertSaveFailureShown(p);
+  p.control.failSet = false;
+  p.click('sample');
+  assert.equal(p.el('saveError').hidden, true);
+  assert.equal(p.el('saveError').textContent, '');
+  assert.match(p.el('msg').textContent, /ergänzt/);
+  assert.equal(p.el('msg').className, 'ok');
+  assert.equal(JSON.parse(p.store.get(KEY)).articles.length, 13);
+});
+
+test('Speicherfehler auf allen schreibenden Bedienpfaden meldet nie Erfolg', async () => {
+  const seed = startPage();
+  seed.click('sample');
+  seed.el('entryArticle').value = 'a1';
+  seed.el('entryQty').value = '5';
+  submit(seed, 'entryForm');
+  seed.click('export-articles');
+  seed.click('export-entries');
+  const [articlesCsv, entriesCsv] = seed.downloads.blobs.map((t) => t.replace(/^﻿/, ''));
+  const stored = JSON.parse(seed.store.get(KEY));
+  const fresh = () => startPage(stored, { failSet: true });
+
+  let p = fresh();
+  p.click('sample');
+  assertSaveFailureShown(p);
+
+  p = fresh();
+  p.el('articleName').value = 'Salz';
+  p.el('articleUnit').value = 'kg';
+  p.el('articleCategory').value = 'haltbar';
+  p.el('articleRhythm').value = 'asneeded';
+  submit(p, 'articleForm');
+  assertSaveFailureShown(p);
+
+  p = fresh();
+  p.click('del-entry', 'e1');
+  assertSaveFailureShown(p);
+
+  p = fresh();
+  p.click('del-article', 'a1');
+  assertSaveFailureShown(p);
+
+  p = fresh();
+  p.click('clear-all');
+  assertSaveFailureShown(p);
+
+  p = fresh();
+  p.el('importArticles').files = [{ text: articlesCsv }];
+  p.el('importArticles').listeners.change();
+  await new Promise((r) => setTimeout(r, 5));
+  assertSaveFailureShown(p);
+
+  p = fresh();
+  p.el('importEntries').files = [{ text: entriesCsv }];
+  p.el('importEntries').listeners.change();
+  await new Promise((r) => setTimeout(r, 5));
+  assertSaveFailureShown(p);
+
+  // der persistente Stand blieb in allen Fällen unverändert
+  assert.deepEqual(JSON.parse(seed.store.get(KEY)), stored);
 });

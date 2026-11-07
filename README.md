@@ -56,7 +56,7 @@ Die Daten liegen ausschließlich im Browser des Geräts (`localStorage`, Schlüs
 
 - Pro Gerät und Browser gibt es einen eigenen Datenbestand; „Browserdaten löschen“ oder ein privates Fenster löscht ihn.
 - Deshalb regelmäßig exportieren (siehe unten).
-- Kann der Browser nicht speichern, meldet die Seite das; dann gelten die Daten nur bis zum Schließen.
+- Kann der Browser nicht speichern, steht oben eine rote Fehlermeldung „Nicht gespeichert“, bis ein späteres Speichern gelingt; eine Erfolgsmeldung gibt es dann nicht. Die Änderungen gelten nur bis zum Schließen oder Neuladen der Seite – sofort als CSV exportieren.
 
 ## Export und Import (CSV)
 
